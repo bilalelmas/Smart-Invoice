@@ -16,12 +16,12 @@ struct A101Profile: VendorProfileProtocol {
         invoice.merchantName = vendorName
         
         let fullText = textBlocks.map { $0.text }.joined(separator: "\n")
-        invoice.rawText = fullText
+        // invoice.rawText = fullText // Removed
         
         // A101 Özel Kural: Fatura No genelde A ile başlar ve 15 hanelidir.
         // Regex: \bA\d{15}\b
         if let invoiceNoRange = fullText.range(of: #"\bA\d{15}\b"#, options: .regularExpression) {
-            invoice.invoiceNumber = String(fullText[invoiceNoRange])
+            invoice.invoiceNo = String(fullText[invoiceNoRange])
         }
         
         // Tarih
@@ -29,7 +29,9 @@ struct A101Profile: VendorProfileProtocol {
             let dateString = String(fullText[dateRange])
             let formatter = DateFormatter()
             formatter.dateFormat = "dd.MM.yyyy"
-            invoice.date = formatter.date(from: dateString)
+            if let date = formatter.date(from: dateString) {
+                invoice.invoiceDate = date
+            }
         }
         
         return invoice

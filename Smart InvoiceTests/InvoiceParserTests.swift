@@ -53,6 +53,6 @@ final class InvoiceParserTests: XCTestCase {
         let profile = A101Profile()
         let invoice = profile.parse(textBlocks: blocks)
         
-        XCTAssertEqual(invoice?.invoiceNumber, "A123456789012345")
+        XCTAssertEqual(invoice?.invoiceNo, "A123456789012345")
     }
 }

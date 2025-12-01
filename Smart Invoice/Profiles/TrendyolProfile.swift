@@ -17,7 +17,7 @@ struct TrendyolProfile: VendorProfileProtocol {
         
         // Ham metni birleştir
         let fullText = textBlocks.map { $0.text }.joined(separator: "\n")
-        invoice.rawText = fullText
+        // invoice.rawText = fullText // Removed in new model
         
         // TODO: Detaylı Regex ve Spatial Analysis buraya eklenecek.
         // Şimdilik basit örnekler:
@@ -27,7 +27,9 @@ struct TrendyolProfile: VendorProfileProtocol {
             let dateString = String(fullText[dateRange])
             let formatter = DateFormatter()
             formatter.dateFormat = "dd.MM.yyyy"
-            invoice.date = formatter.date(from: dateString)
+            if let date = formatter.date(from: dateString) {
+                invoice.invoiceDate = date
+            }
         }
         
         // Tutar bulma (Basit yaklaşım - en büyük sayıyı bulmaya çalışabiliriz veya "Toplam" kelimesini arayabiliriz)
