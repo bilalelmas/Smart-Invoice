@@ -14,45 +14,24 @@ final class InvoiceParserTests: XCTestCase {
     }
 
     func testTrendyolDetection() throws {
-        // Mock TextBlock verisi
-        let blocks = [
-            TextBlock(text: "Trendyol", boundingBox: .zero),
-            TextBlock(text: "Satıcı: DSM Grup", boundingBox: .zero),
-            TextBlock(text: "Tarih: 01.01.2024", boundingBox: .zero)
-        ]
-        
-        // Private metodları test etmek zor olduğu için, 
-        // ya internal yapmalıyız ya da public arayüzden test etmeliyiz.
-        // Şimdilik VendorProfileProtocol üzerinden test edelim.
-        
+        let text = "Trendyol\nSatıcı: DSM Grup\nTarih: 01.01.2024"
         let profile = TrendyolProfile()
-        let fullText = blocks.map { $0.text }.joined(separator: "\n")
-        
-        XCTAssertTrue(profile.isMatch(text: fullText))
+        XCTAssertTrue(profile.applies(to: text.lowercased()))
     }
 
     func testA101Detection() throws {
-        let blocks = [
-            TextBlock(text: "A101", boundingBox: .zero),
-            TextBlock(text: "Yeni Mağazacılık A.Ş.", boundingBox: .zero),
-            TextBlock(text: "Fatura No: A123456789012345", boundingBox: .zero)
-        ]
-        
+        let text = "A101\nYeni Mağazacılık A.Ş.\nFatura No: A123456789012345"
         let profile = A101Profile()
-        let fullText = blocks.map { $0.text }.joined(separator: "\n")
-        
-        XCTAssertTrue(profile.isMatch(text: fullText))
+        XCTAssertTrue(profile.applies(to: text.lowercased()))
     }
     
     func testA101InvoiceNumberParsing() throws {
-        let blocks = [
-            TextBlock(text: "A101", boundingBox: .zero),
-            TextBlock(text: "Fatura No: A123456789012345", boundingBox: .zero)
-        ]
-        
+        let text = "A101\nFatura No: A123456789012345"
         let profile = A101Profile()
-        let invoice = profile.parse(textBlocks: blocks)
         
-        XCTAssertEqual(invoice?.invoiceNo, "A123456789012345")
+        var invoice = Invoice()
+        profile.applyRules(to: &invoice, rawText: text)
+        
+        XCTAssertEqual(invoice.invoiceNo, "A123456789012345")
     }
 }

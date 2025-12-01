@@ -1,20 +1,19 @@
 import Foundation
 
-/// Satıcı profilleri için protokol.
-/// Protocol for vendor profiles to implement parsing logic.
-protocol VendorProfileProtocol {
-    /// Satıcının adı (Örn: "Trendyol", "A101").
+/// Satıcıya özel fatura işleme kurallarını tanımlayan protokol.
+/// Tez Notu: Burada 'Strategy Design Pattern' kullanılarak farklı satıcı formatları
+/// tek bir arayüz üzerinden yönetilmiştir. (Bkz: profile_base.py)
+protocol VendorProfile {
+    /// Profilin adı (Örn: Trendyol, A101)
     var vendorName: String { get }
     
-    /// Verilen metnin bu satıcıya ait olup olmadığını kontrol eder.
-    /// Checks if the given text belongs to this vendor.
-    /// - Parameter text: OCR'dan gelen ham metin.
-    /// - Returns: Eşleşme varsa true.
-    func isMatch(text: String) -> Bool
+    /// Bu profilin verilen metne uygulanıp uygulanamayacağını kontrol eder.
+    /// - Parameter text: OCR'dan gelen ham metin (küçük harfe çevrilmiş)
+    func applies(to textLowercased: String) -> Bool
     
-    /// Metin bloklarını analiz ederek Fatura nesnesi oluşturur.
-    /// Parses text blocks to create an Invoice object.
-    /// - Parameter textBlocks: OCR'dan gelen metin blokları.
-    /// - Returns: Oluşturulan Fatura nesnesi veya nil.
-    func parse(textBlocks: [TextBlock]) -> Invoice?
+    /// Satıcıya özel düzeltme kurallarını faturaya uygular.
+    /// - Parameters:
+    ///   - invoice: Düzenlenecek fatura objesi (inout ile referans olarak gelir)
+    ///   - rawText: Orijinal ham metin
+    func applyRules(to invoice: inout Invoice, rawText: String)
 }

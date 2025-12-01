@@ -1,39 +1,23 @@
 import Foundation
-import CoreGraphics
 
 /// A101 faturaları için ayrıştırma profili.
-/// Parsing profile for A101 invoices.
-struct A101Profile: VendorProfileProtocol {
+struct A101Profile: VendorProfile {
     var vendorName: String { "A101" }
     
-    func isMatch(text: String) -> Bool {
-        return text.localizedCaseInsensitiveContains("A101") || 
-               text.localizedCaseInsensitiveContains("Yeni Mağazacılık")
+    func applies(to textLowercased: String) -> Bool {
+        return textLowercased.contains("a101") || textLowercased.contains("yeni mağazacılık")
     }
     
-    func parse(textBlocks: [TextBlock]) -> Invoice? {
-        var invoice = Invoice()
+    func applyRules(to invoice: inout Invoice, rawText: String) {
         invoice.merchantName = vendorName
-        
-        let fullText = textBlocks.map { $0.text }.joined(separator: "\n")
-        // invoice.rawText = fullText // Removed
         
         // A101 Özel Kural: Fatura No genelde A ile başlar ve 15 hanelidir.
         // Regex: \bA\d{15}\b
-        if let invoiceNoRange = fullText.range(of: #"\bA\d{15}\b"#, options: .regularExpression) {
-            invoice.invoiceNo = String(fullText[invoiceNoRange])
-        }
-        
-        // Tarih
-        if let dateRange = fullText.range(of: #"\d{2}\.\d{2}\.\d{4}"#, options: .regularExpression) {
-            let dateString = String(fullText[dateRange])
-            let formatter = DateFormatter()
-            formatter.dateFormat = "dd.MM.yyyy"
-            if let date = formatter.date(from: dateString) {
-                invoice.invoiceDate = date
+        // InvoiceParser bulamadıysa veya yanlış bulduysa burada düzeltebiliriz.
+        if invoice.invoiceNo.isEmpty {
+            if let range = rawText.range(of: #"\bA\d{15}\b"#, options: .regularExpression) {
+                invoice.invoiceNo = String(rawText[range])
             }
         }
-        
-        return invoice
     }
 }

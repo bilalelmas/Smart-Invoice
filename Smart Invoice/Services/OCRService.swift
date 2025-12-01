@@ -11,7 +11,7 @@ class OCRService: ObservableObject {
     @Published var isProcessing: Bool = false
     
     // Vendor Profilleri
-    private let profiles: [VendorProfileProtocol] = [
+    private let profiles: [VendorProfile] = [
         TrendyolProfile(),
         A101Profile(),
         DefaultProfile()
@@ -84,64 +84,39 @@ class OCRService: ObservableObject {
     
     /// Ham metni ve blokları analiz edip Fatura objesine dönüştürür.
     private func parseRawTextToInvoice(text: String, blocks: [TextBlock]) -> Invoice {
-        // 1. Adım: Vendor Profiling (Strategy Pattern)
-        // Eğer bir satıcı profili eşleşirse, onun parsing mantığını kullan.
+        // 1. Adım: Genel Regex Analizi (InvoiceParser)
+        // Önce genel kurallarla bir taslak oluşturuyoruz.
+        var invoice = InvoiceParser.shared.parse(text: text)
+        
+        // 2. Adım: Vendor Profiling (Strategy Pattern)
+        // Satıcıyı tanı ve ona özel kuralları uygula.
+        let textLowercased = text.lowercased()
+        
         for profile in profiles {
-            if profile.isMatch(text: text) {
+            // DefaultProfile en sonda olmalı veya mantık ona göre kurulmalı.
+            // Ancak burada listeyi sırayla geziyoruz.
+            // DefaultProfile her şeye uyduğu için en sona koymak mantıklı, 
+            // ama burada 'ilk eşleşen' mantığı yerine 'uygun olanı uygula' diyebiliriz.
+            // Fakat genelde tek bir satıcı olur.
+            
+            if profile.applies(to: textLowercased) {
                 print("OCRService: Tespit edilen satıcı profili: \(profile.vendorName)")
-                if let invoice = profile.parse(textBlocks: blocks) {
-                    // Profil başarılı bir şekilde parse ettiyse döndür
-                    // Ancak eksik alanlar varsa aşağıda genel regex ile tamamlayabiliriz (Hybrid yaklaşım)
-                    return completeInvoiceWithFallback(invoice, text: text)
+                profile.applyRules(to: &invoice, rawText: text)
+                
+                // Eğer DefaultProfile değilse döngüden çıkabiliriz (Strategy seçildi)
+                if !(profile is DefaultProfile) {
+                    break
                 }
             }
         }
         
-        print("OCRService: Satıcı profili eşleşmedi, genel Regex analizi yapılıyor.")
-        
-        // 2. Adım: Fallback (Genel Regex Analizi)
-        var invoice = Invoice(userId: "")
-        return completeInvoiceWithFallback(invoice, text: text)
+        return invoice
     }
     
     /// Faturadaki eksik alanları genel regex kurallarıyla doldurur.
-    private func completeInvoiceWithFallback(_ partialInvoice: Invoice, text: String) -> Invoice {
-        var invoice = partialInvoice
-        
-        // InvoiceParser (Regex Motoru) ile tam bir analiz yap
-        let regexInvoice = InvoiceParser.shared.parse(text: text)
-        
-        // Eksik alanları Regex sonucuyla doldur
-        if invoice.totalAmount == 0.0 {
-            invoice.totalAmount = regexInvoice.totalAmount
-        }
-        
-        // Tarih kontrolü: Eğer mevcut tarih bugün ise (varsayılan) ve regex farklı bir tarih bulduysa
-        if Calendar.current.isDateInToday(invoice.invoiceDate) && !Calendar.current.isDateInToday(regexInvoice.invoiceDate) {
-            invoice.invoiceDate = regexInvoice.invoiceDate
-        }
-        
-        if invoice.merchantTaxID.isEmpty {
-            invoice.merchantTaxID = regexInvoice.merchantTaxID
-        }
-        
-        if invoice.invoiceNo.isEmpty {
-            invoice.invoiceNo = regexInvoice.invoiceNo
-        }
-        
-        if invoice.ettn.isEmpty {
-            invoice.ettn = regexInvoice.ettn
-        }
-        
-        if invoice.merchantName.isEmpty {
-            invoice.merchantName = regexInvoice.merchantName
-        }
-        
-        // Güven skorunu güncelle
-        invoice.confidenceScore = max(invoice.confidenceScore, regexInvoice.confidenceScore)
-        
-        return invoice
-    }
+    // Bu metod artık kullanılmıyor çünkü InvoiceParser ana parser oldu.
+    // private func completeInvoiceWithFallback... (Silindi)
+
     
     // MARK: - Helper Regex Functions
     // Regex fonksiyonları InvoiceParser sınıfına taşındı.
