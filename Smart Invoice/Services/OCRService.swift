@@ -108,89 +108,41 @@ class OCRService: ObservableObject {
     private func completeInvoiceWithFallback(_ partialInvoice: Invoice, text: String) -> Invoice {
         var invoice = partialInvoice
         
-        // 1. Toplam Tutar Bulma
+        // InvoiceParser (Regex Motoru) ile tam bir analiz yap
+        let regexInvoice = InvoiceParser.shared.parse(text: text)
+        
+        // Eksik alanları Regex sonucuyla doldur
         if invoice.totalAmount == 0.0 {
-            if let total = extractDouble(from: text, regex: "(?i)TOPLAM[:\\s]*([\\d.,]+)") {
-                invoice.totalAmount = total
-            }
+            invoice.totalAmount = regexInvoice.totalAmount
         }
         
-        // 2. Tarih Bulma
-        // Profil bulamadıysa veya yanlış bulduysa tekrar bakılabilir (Opsiyonel)
-        // Şimdilik sadece boşsa dolduruyoruz.
-        // Not: Date optional değil, varsayılan Date() var. O yüzden kontrolü nasıl yapacağımız önemli.
-        // Varsayılan tarih bugünün tarihi ise ve biz regex ile başka bir tarih bulursak değiştirelim.
-        if Calendar.current.isDateInToday(invoice.invoiceDate) { // Basit bir kontrol
-             if let date = extractDate(from: text) {
-                 invoice.invoiceDate = date
-             }
+        // Tarih kontrolü: Eğer mevcut tarih bugün ise (varsayılan) ve regex farklı bir tarih bulduysa
+        if Calendar.current.isDateInToday(invoice.invoiceDate) && !Calendar.current.isDateInToday(regexInvoice.invoiceDate) {
+            invoice.invoiceDate = regexInvoice.invoiceDate
         }
         
-        // 3. Vergi No / TCKN Bulma
         if invoice.merchantTaxID.isEmpty {
-            if let taxId = extractString(from: text, regex: "\\b[0-9]{10,11}\\b") {
-                invoice.merchantTaxID = taxId
-            }
+            invoice.merchantTaxID = regexInvoice.merchantTaxID
         }
+        
+        if invoice.invoiceNo.isEmpty {
+            invoice.invoiceNo = regexInvoice.invoiceNo
+        }
+        
+        if invoice.ettn.isEmpty {
+            invoice.ettn = regexInvoice.ettn
+        }
+        
+        if invoice.merchantName.isEmpty {
+            invoice.merchantName = regexInvoice.merchantName
+        }
+        
+        // Güven skorunu güncelle
+        invoice.confidenceScore = max(invoice.confidenceScore, regexInvoice.confidenceScore)
         
         return invoice
     }
     
     // MARK: - Helper Regex Functions
-    
-    private func extractDouble(from text: String, regex: String) -> Double? {
-        guard let range = text.range(of: regex, options: .regularExpression) else { return nil }
-        let match = String(text[range])
-        
-        // Sadece sayısal kısmı al (regex grubunu yakalamak daha iyi olurdu ama basitçe yapalım)
-        // Regex grubunu almak için NSRegularExpression kullanmak daha sağlıklı.
-        
-        do {
-            let regexObj = try NSRegularExpression(pattern: regex, options: [])
-            let nsString = text as NSString
-            let results = regexObj.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
-            
-            if let first = results.first, first.numberOfRanges > 1 {
-                let range = first.range(at: 1) // 1. Grup (Sayı kısmı)
-                let numberString = nsString.substring(with: range)
-                
-                // Format düzeltme: 1.250,00 -> 1250.00
-                // veya 1,250.00 -> 1250.00
-                // Türkiye standardı: Nokta binlik, Virgül ondalık.
-                
-                let cleanedString = numberString.replacingOccurrences(of: ".", with: "")
-                                                .replacingOccurrences(of: ",", with: ".")
-                
-                return Double(cleanedString)
-            }
-        } catch {
-            print("Regex hatası: \(error)")
-        }
-        
-        return nil
-    }
-    
-    private func extractDate(from text: String) -> Date? {
-        // Regex: dd.MM.yyyy veya dd/MM/yyyy
-        let regex = #"(\d{2}[./-]\d{2}[./-]\d{4})"#
-        guard let range = text.range(of: regex, options: .regularExpression) else { return nil }
-        let dateString = String(text[range])
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd.MM.yyyy" // Varsayılan deneme
-        if let date = formatter.date(from: dateString) { return date }
-        
-        formatter.dateFormat = "dd/MM/yyyy"
-        if let date = formatter.date(from: dateString) { return date }
-        
-        formatter.dateFormat = "dd-MM-yyyy"
-        if let date = formatter.date(from: dateString) { return date }
-        
-        return nil
-    }
-    
-    private func extractString(from text: String, regex: String) -> String? {
-        guard let range = text.range(of: regex, options: .regularExpression) else { return nil }
-        return String(text[range])
-    }
-}
+    // Regex fonksiyonları InvoiceParser sınıfına taşındı.
+
