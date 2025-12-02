@@ -21,7 +21,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, UIDocumentPickerViewControllerDelegate {
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
         var parent: DocumentPicker
 
         init(_ parent: DocumentPicker) {
