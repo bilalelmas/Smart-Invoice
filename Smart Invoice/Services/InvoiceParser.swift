@@ -108,8 +108,9 @@ class InvoiceParser {
                 let upperLine = line.uppercased()
                 if upperLine.contains(keyword) {
                     // Bu satırda sayısal değeri bul
-                    // Regex: Sayı nokta veya virgül Sayı
-                    if let amountStr = extractString(from: line, pattern: "(\\d+[.,]\\d{2})") {
+                    // Regex: Binlik ayraçlı (1.234,56) veya düz (1234,56) formatları destekle
+                    // (\d{1,3}(?:[.,]\d{3})*[.,]\d{2})
+                    if let amountStr = extractString(from: line, pattern: "(\\d{1,3}(?:[.,]\\d{3})*[.,]\\d{2})") {
                         return normalizeAmount(amountStr)
                     }
                 }
