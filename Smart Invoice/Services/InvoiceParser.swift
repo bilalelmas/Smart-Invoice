@@ -13,6 +13,10 @@ class InvoiceParser {
     ]
     
     func parse(text: String) -> Invoice {
+        print("🔍 OCR ÇIKTISI BAŞLANGIÇ ---")
+        print(text)
+        print("🔍 OCR ÇIKTISI BİTİŞ ---")
+        
         var invoice = Invoice(userId: "")
         let cleanText = text.uppercased() // Büyük harf normalizasyonu
         
@@ -43,47 +47,65 @@ class InvoiceParser {
         return invoice
     }
     
-    // MARK: - Gelişmiş Tutar Çıkarma Mantığı
+    // MARK: - Gelişmiş Tutar Çıkarma Mantığı (DÜZELTİLDİ)
     
-    /// Toplam tutarı bulmak için faturayı sondan başa doğru tarar.
-    /// Örnekler: "ÖDENECEK TUTAR 319,90TL", "GENEL TOPLAM 1.664,90"
     internal func extractTotalAmount(from text: String) -> Double {
-        // En güçlü anahtar kelimelerden en zayıfa doğru sıralı
+        // Aranacak anahtar kelimeler (Önem sırasına göre)
         let keywords = [
             "ÖDENECEK TUTAR",
             "ODENECEK TUTAR",
             "GENEL TOPLAM",
             "TOPLAM TUTAR",
-            "VERGILER DAHIL TOPLAM",
-            "VERGİLER DAHİL TOPLAM TUTAR"
+            "VERGİLER DAHİL",
+            "VERGILER DAHIL"
+        ]
+        
+        // Yasaklı kelimeler (Bu kelimelerin olduğu satırları toplam sanma!)
+        let blackList = [
+            "HARIÇ", "HARIC", "MATRAH", "NET TUTAR", "KDVSİZ", "KDV'SİZ"
         ]
         
         let lines = text.components(separatedBy: .newlines)
+        var candidates: [Double] = []
         
-        // Faturanın alt kısımlarına bakmak için tersten döngü (Reverse Loop)
+        // 1. ADIM: Satır satır gez ve adayları topla
         for line in lines.reversed() {
-            for keyword in keywords {
-                if line.contains(keyword) {
-                    // Anahtar kelimeyi bulduk, şimdi sayı avına çıkalım
-                    if let amount = findAmountInString(line) {
-                        return amount
-                    }
+            let upperLine = line.uppercased()
+            
+            // Eğer satırda "Hariç" veya "Matrah" yazıyorsa o satırı atla!
+            // Bu sayede "Mal Hizmet Toplamı (Vergi Hariç)" satırını eleriz.
+            if blackList.contains(where: { upperLine.contains($0) }) {
+                continue
+            }
+            
+            // Anahtar kelimelerden biri geçiyor mu?
+            if keywords.contains(where: { upperLine.contains($0) }) {
+                if let amount = findAmountInString(line) {
+                    candidates.append(amount)
                 }
             }
         }
         
-        // Eğer satırda bulamazsa, anahtar kelimenin hemen altındaki satıra bak (Bazen kayma olur)
+        // 2. ADIM: "ÖDENECEK TUTAR" etiketini özel olarak bir daha kontrol et (Kesinlik için)
+        // Bazen etiket ve fiyat alt alta olabilir, bu yüzden satırın kendisinde yoksa altına bak.
         for (index, line) in lines.enumerated().reversed() {
-            for keyword in keywords {
-                if line.contains(keyword) {
-                    // Bir sonraki satıra bak (Array bounds kontrolü ile)
-                    if index + 1 < lines.count {
-                        if let amount = findAmountInString(lines[index + 1]) {
-                            return amount
-                        }
-                    }
+            if line.uppercased().contains("ÖDENECEK TUTAR") || line.uppercased().contains("ODENECEK TUTAR") {
+                // Aynı satırda bulamazsa bir alt satıra bak
+                if let amount = findAmountInString(line) {
+                    candidates.append(amount)
+                } else if index + 1 < lines.count {
+                     if let amount = findAmountInString(lines[index + 1]) {
+                         candidates.append(amount)
+                     }
                 }
             }
+        }
+
+        // 3. ADIM: Matematiksel Garanti (Max Value Strategy)
+        // Bir faturada "Ara Toplam", "KDV" ve "Genel Toplam" varsa;
+        // En büyük sayı HER ZAMAN "Genel Toplam"dır.
+        if let maxAmount = candidates.max() {
+            return maxAmount
         }
         
         return 0.0

@@ -94,14 +94,28 @@ struct DashboardView: View {
                     }
                 }
             }
+            // 3. Analiz Bitince Düzenleme Ekranı (EditView)
             .sheet(item: $viewModel.currentDraftInvoice) { _ in
-                if let _ = viewModel.currentDraftInvoice {
-                    InvoiceEditView(
-                        invoice: Binding(get: { viewModel.currentDraftInvoice! }, set: { viewModel.currentDraftInvoice = $0 }),
-                        onSave: { viewModel.saveInvoice() },
-                        onCancel: { viewModel.currentDraftInvoice = nil }
-                    )
-                }
+                // Sheet içeriğini oluştururken güvenli kontrol
+                InvoiceEditView(
+                    invoice: Binding(
+                        get: { 
+                            // KRİTİK DÜZELTME: (!) yerine (??) kullanıyoruz.
+                            // Eğer nil ise boş bir fatura objesi döndür ki çökmez.
+                            viewModel.currentDraftInvoice ?? Invoice(userId: "") 
+                        },
+                        set: { newValue in
+                            // Değişiklikleri geri yansıt
+                            viewModel.currentDraftInvoice = newValue 
+                        }
+                    ),
+                    onSave: {
+                        viewModel.saveInvoice()
+                    },
+                    onCancel: {
+                        viewModel.currentDraftInvoice = nil
+                    }
+                )
             }
         }
     }

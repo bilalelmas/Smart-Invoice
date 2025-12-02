@@ -44,16 +44,24 @@ class InvoiceViewModel: ObservableObject {
         invoice.status = .approved
         invoice.createdAt = Date()
         
-        // Firebase'e ekle
         do {
-            try db.collection("invoices").addDocument(from: invoice)
+            // 1. Önce Firebase'e ekle ve referansı (ref) al
+            let ref = try db.collection("invoices").addDocument(from: invoice)
             
-            // Listeyi yerel olarak güncelle (Anlık görünmesi için)
-            self.invoices.insert(invoice, at: 0)
-            self.currentDraftInvoice = nil // Formu kapat
-            print("✅ Fatura başarıyla kaydedildi.")
+            // 2. Firebase'in oluşturduğu ID'yi bizim modele ata
+            invoice.id = ref.documentID
+            
+            // 3. Artık ID'si olan faturayı listeye ekle
+            // (Böylece "ID nil" hatası almazsın)
+            DispatchQueue.main.async {
+                self.invoices.insert(invoice, at: 0)
+                self.currentDraftInvoice = nil // Formu kapat
+                print("✅ Fatura başarıyla kaydedildi. ID: \(ref.documentID)")
+            }
+            
         } catch {
             self.errorMessage = "Kaydetme hatası: \(error.localizedDescription)"
+            print("❌ Kayıt hatası: \(error.localizedDescription)")
         }
     }
 }

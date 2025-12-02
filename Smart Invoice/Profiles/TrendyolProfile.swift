@@ -6,8 +6,15 @@ struct TrendyolProfile: VendorProfile {
     var vendorName: String = "Trendyol"
     
     func applies(to textLowercased: String) -> Bool {
-        // Python: ('trendyol' in text_lower) or ('trendyolmail' in text_lower)
-        return textLowercased.contains("trendyol") || textLowercased.contains("trendyolmail")
+        // Sadece "trendyol" kelimesi geçmesi yetmez, fatura başlığında veya mail adresinde arayalım.
+        // Eski kod çok agresifti.
+        
+        let isTrendyolVendor = textLowercased.contains("dsm grup") || textLowercased.contains("trendyol")
+        
+        // Eğer metin çok kısaysa (hatalı okuma) false dön
+        if textLowercased.count < 50 { return false }
+        
+        return isTrendyolVendor
     }
     
     func applyRules(to invoice: inout Invoice, rawText: String) {

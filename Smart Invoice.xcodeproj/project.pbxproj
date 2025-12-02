@@ -36,9 +36,22 @@
 		74379B412EDF06EE00811EC0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		74379B4D2EDF8D7700811EC0 /* Exceptions for "Smart Invoice" folder in "Smart Invoice" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Smart-Invoice-Info.plist",
+			);
+			target = 7408D2FD2EDD955600127ECD /* Smart Invoice */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7408D3002EDD955600127ECD /* Smart Invoice */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				74379B4D2EDF8D7700811EC0 /* Exceptions for "Smart Invoice" folder in "Smart Invoice" target */,
+			);
 			path = "Smart Invoice";
 			sourceTree = "<group>";
 		};
@@ -419,11 +432,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Smart Invoice/Smart Invoice.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2TPHQV67NJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Smart-Invoice-Info.plist";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Fatura ve fişlerinizi taramak için kamera erişimi gereklidir.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Galerinizdeki fatura fotoğraflarını yüklemek için izin gereklidir.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -453,11 +469,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Smart Invoice/Smart Invoice.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2TPHQV67NJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Smart-Invoice-Info.plist";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Fatura ve fişlerinizi taramak için kamera erişimi gereklidir.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Galerinizdeki fatura fotoğraflarını yüklemek için izin gereklidir.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
