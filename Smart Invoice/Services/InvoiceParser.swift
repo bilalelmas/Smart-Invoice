@@ -6,6 +6,13 @@ class InvoiceParser {
     
     static let shared = InvoiceParser()
     
+    // Mevcut profilleri listeye ekliyoruz
+    private let profiles: [VendorProfile] = [
+        TrendyolProfile(),
+        A101Profile(),
+        FLOProfile()
+    ]
+    
     private init() {}
     
     /// OCR'dan gelen ham metni işler ve Fatura objesi döndürür.
@@ -21,13 +28,20 @@ class InvoiceParser {
         invoice.merchantTaxID = extractTaxID(from: text)
         invoice.totalAmount = extractTotalAmount(from: text)
         
-        // Python kodundaki 'ProfileRule' mantığı:
-        // Eğer belirli bir satıcı tespit edilirse (Örn: A101, Trendyol) özel kurallar eklenebilir.
-        if text.lowercased().contains("trendyol") {
-            // Trendyol'a özel ekstra temizlik gerekirse buraya eklenecek.
+        // 2. VENDOR PROFILING (STRATEGY PATTERN)
+        // Metni küçük harfe çevirip profilleri kontrol et
+        let textLower = text.lowercased()
+        
+        for profile in profiles {
+            if profile.applies(to: textLower) {
+                print("✅ Tespit Edilen Satıcı Profili: \(profile.vendorName)")
+                // Profile özel kuralları uygula
+                profile.applyRules(to: &invoice, rawText: text)
+                break // İlk eşleşen profili uygula ve çık
+            }
         }
         
-        // OCR metninin kalitesine göre bir güven skoru ata (Basit mantık)
+        // 3. Güven Skoru Hesapla
         invoice.confidenceScore = calculateConfidence(invoice: invoice)
         
         return invoice
@@ -122,7 +136,7 @@ class InvoiceParser {
     // MARK: - Utilities
     
     /// Generic Regex String Extractor
-    private func extractString(from text: String, pattern: String) -> String? {
+    func extractString(from text: String, pattern: String) -> String? {
         do {
             let regex = try NSRegularExpression(pattern: pattern, options: [])
             let nsString = text as NSString
@@ -142,7 +156,7 @@ class InvoiceParser {
     }
     
     /// "1.250,50" -> 1250.50 çevrimi yapar
-    private func normalizeAmount(_ amountStr: String) -> Double {
+    func normalizeAmount(_ amountStr: String) -> Double {
         // Binlik ayracı (.) kaldır, ondalık ayracı (,) nokta yap
         var cleanStr = amountStr.replacingOccurrences(of: ".", with: "")
         cleanStr = cleanStr.replacingOccurrences(of: ",", with: ".")
