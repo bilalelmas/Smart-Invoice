@@ -31,9 +31,7 @@ struct MainTabView: View {
                 case .scan:
                     Color.clear // Buraya düşmez
                 case .analytics:
-                    Text("Analiz Ekranı (Yakında)")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(hex: "F2F2F7"))
+                    AnalyticsView(viewModel: viewModel)
                 case .profile:
                     Text("Profil Ekranı (Yakında)")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -76,15 +74,18 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $showScanner) {
             ScannerView(didFinishScanning: { result in
-                switch result {
-                case .success(let images):
-                    if let firstImage = images.first {
-                        viewModel.scanInvoice(image: firstImage)
-                    }
-                case .failure(let error):
-                    print("Tarama hatası: \(error.localizedDescription)")
-                }
                 showScanner = false
+                // Sheet kapanma animasyonu için gecikme
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    switch result {
+                    case .success(let images):
+                        if let firstImage = images.first {
+                            viewModel.scanInvoice(image: firstImage)
+                        }
+                    case .failure(let error):
+                        print("Tarama hatası: \(error.localizedDescription)")
+                    }
+                }
             }, didCancelScanning: {
                 showScanner = false
             })
@@ -94,22 +95,28 @@ struct MainTabView: View {
             ImagePicker(selectedImage: $selectedImage, isPresented: $showImagePicker)
                 .onDisappear {
                     if let img = selectedImage {
-                        viewModel.scanInvoice(image: img)
-                        selectedImage = nil
+                        // Sheet kapanma animasyonu için gecikme
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            viewModel.scanInvoice(image: img)
+                            selectedImage = nil
+                        }
                     }
                 }
         }
         .sheet(isPresented: $showFilePicker) {
             DocumentPicker { localUrl in
                 showFilePicker = false
-                let extensionName = localUrl.pathExtension.lowercased()
-                if extensionName == "pdf" {
-                    if let pdfImage = PDFHelper.pdfToImage(url: localUrl) {
-                        viewModel.scanInvoice(image: pdfImage)
-                    }
-                } else if ["jpg", "jpeg", "png"].contains(extensionName) {
-                    if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
-                        viewModel.scanInvoice(image: img)
+                // Sheet kapanma animasyonu için gecikme
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    let extensionName = localUrl.pathExtension.lowercased()
+                    if extensionName == "pdf" {
+                        if let pdfImage = PDFHelper.pdfToImage(url: localUrl) {
+                            viewModel.scanInvoice(image: pdfImage)
+                        }
+                    } else if ["jpg", "jpeg", "png"].contains(extensionName) {
+                        if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
+                            viewModel.scanInvoice(image: img)
+                        }
                     }
                 }
             }
