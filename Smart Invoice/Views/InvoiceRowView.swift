@@ -4,47 +4,53 @@ struct InvoiceRowView: View {
     let invoice: Invoice
     
     var body: some View {
-        HStack {
-            // Sol Taraf: İkon ve Firma Adı
+        HStack(spacing: 16) {
+            // Sol Taraf: Kategori İkonu (Yuvarlak Arka Planlı)
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.1))
+                    .frame(width: 48, height: 48)
+                
+                Image(systemName: "doc.text.fill") // İleride kategoriye göre değişebilir
+                    .font(.system(size: 20))
+                    .foregroundColor(.blue)
+            }
+            
+            // Orta Kısım: Firma ve Tarih
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Image(systemName: "building.2.crop.circle.fill")
-                        .foregroundColor(.blue)
-                        .font(.system(size: 24))
-                    
-                    Text(invoice.merchantName.isEmpty ? "Bilinmeyen Satıcı" : invoice.merchantName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .lineLimit(1)
-                }
+                Text(invoice.merchantName.isEmpty ? "Bilinmeyen Satıcı" : invoice.merchantName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
                 
                 Text(invoice.invoiceDate, style: .date)
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
             }
             
             Spacer()
             
             // Sağ Taraf: Tutar ve Durum
             VStack(alignment: .trailing, spacing: 4) {
-                Text("\(invoice.totalAmount, specifier: "%.2f") ₺")
+                Text("-\(invoice.totalAmount, specifier: "%.2f") ₺") // Gider olduğu için eksi
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(.primary) // Veya .red yapılabilir
                 
-                // Durum Rozeti (Badge)
+                // Durum Rozeti
                 Text(invoice.status.rawValue)
-                    .font(.caption2)
-                    .fontWeight(.bold)
+                    .font(.system(size: 10, weight: .bold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(statusColor(invoice.status).opacity(0.2))
+                    .background(statusColor(invoice.status).opacity(0.15))
                     .foregroundColor(statusColor(invoice.status))
-                    .cornerRadius(8)
+                    .cornerRadius(6)
             }
         }
-        .padding()
+        .padding(16)
         .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 4)
+        .padding(.horizontal, 16) // Kenarlardan boşluk
     }
     
     // Duruma göre renk belirleme

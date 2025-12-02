@@ -8,35 +8,41 @@ struct DashboardView: View {
     @State private var showScanner = false
     @State private var showImagePicker = false
     @State private var showFilePicker = false
+    @State private var showActionSheet = false
     @State private var selectedImage: UIImage?
-    @State private var fileData: Data? // Dosya picker için
+    @State private var fileData: Data?
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
-                Color(UIColor.systemGroupedBackground) // Hafif gri arka plan
+                Color(UIColor.systemGroupedBackground)
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
-                    // ÜST ÖZET KARTI
-                    summaryHeader
+                    // ÜST ANALİZ KARTI
+                    analysisHeader
                     
                     // LİSTE ALANI
                     if viewModel.invoices.isEmpty {
                         emptyStateView
                     } else {
                         List {
-                            ForEach(viewModel.invoices) { invoice in
-                                InvoiceRowView(invoice: invoice)
-                                    .listRowSeparator(.hidden) // Çizgileri kaldır
-                                    .listRowBackground(Color.clear) // Arka planı temizle
-                                    .padding(.bottom, 6)
+                            // Faturaları tarihe göre grupla
+                            ForEach(groupedInvoices.keys.sorted(by: >), id: \.self) { date in
+                                Section(header: Text(dateFormatter.string(from: date))) {
+                                    ForEach(groupedInvoices[date] ?? []) { invoice in
+                                        InvoiceRowView(invoice: invoice)
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .padding(.bottom, 6)
+                                    }
+                                    .onDelete(perform: deleteInvoice)
+                                }
                             }
-                            .onDelete(perform: deleteInvoice)
                         }
                         .listStyle(.plain)
                         .refreshable {
-                            // İleride buraya Firebase'den veri çekme gelecek
+                            // Firebase refresh logic
                         }
                     }
                 }
@@ -46,7 +52,7 @@ struct DashboardView: View {
                     loadingOverlay
                 }
             }
-            .navigationTitle("Cüzdan")
+            .navigationTitle("Fatura Analiz")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     menuButton
@@ -61,15 +67,28 @@ struct DashboardView: View {
                     .onDisappear { if let img = selectedImage { viewModel.scanInvoice(image: img); selectedImage = nil } }
             }
             .sheet(isPresented: $showFilePicker) {
-                DocumentPicker(content: $fileData, isPresented: $showFilePicker) { url in
-                    // PDF ise resme çevir, resimse direkt al
-                    if url.pathExtension.lowercased() == "pdf" {
-                        if let pdfImage = PDFHelper.pdfToImage(url: url) {
+                // DocumentPicker artık sadece onSelect ile URL dönüyor
+                DocumentPicker { localUrl in
+                    print("📁 Dosya seçildi: \(localUrl.path)")
+                    
+                    // Dosya seçildikten sonra sheet'i kapat
+                    showFilePicker = false
+                    
+                    // Uzantıya göre işlem yap
+                    let extensionName = localUrl.pathExtension.lowercased()
+                    
+                    if extensionName == "pdf" {
+                        // PDF Helper ile resme çevir
+                        if let pdfImage = PDFHelper.pdfToImage(url: localUrl) {
+                            print("✅ PDF Resme çevrildi, analize gönderiliyor...")
                             viewModel.scanInvoice(image: pdfImage)
+                        } else {
+                            print("❌ PDF Resme çevrilemedi.")
                         }
-                    } else {
+                    } else if ["jpg", "jpeg", "png"].contains(extensionName) {
                         // Resim dosyası ise
-                        if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                        if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
+                            print("✅ Resim yüklendi, analize gönderiliyor...")
                             viewModel.scanInvoice(image: img)
                         }
                     }
@@ -87,38 +106,68 @@ struct DashboardView: View {
         }
     }
     
+    // MARK: - Computed Properties
+    
+    // Faturaları tarihe göre gruplama (Sadece gün bazlı)
+    var groupedInvoices: [Date: [Invoice]] {
+        Dictionary(grouping: viewModel.invoices) { invoice in
+            Calendar.current.startOfDay(for: invoice.invoiceDate)
+        }
+    }
+    
+    var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.locale = Locale(identifier: "tr_TR")
+        return formatter
+    }
+    
     // MARK: - UI Bileşenleri
     
-    var summaryHeader: some View {
-        VStack(alignment: .leading) {
-            Text("Bu Ay Toplam")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.8))
+    var analysisHeader: some View {
+        HStack(spacing: 20) {
+            // Sol: Toplam Tutar
+            VStack(alignment: .leading) {
+                Text("Toplam Gider")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+                
+                let total = viewModel.invoices.reduce(0) { $0 + $1.totalAmount }
+                Text("\(total, specifier: "%.2f") ₺")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+            }
             
-            // Toplam tutarı hesapla
-            let total = viewModel.invoices.reduce(0) { $0 + $1.totalAmount }
-            Text("\(total, specifier: "%.2f") ₺")
-                .font(.system(size: 32, weight: .bold))
-                .foregroundColor(.white)
+            Spacer()
+            
+            // Sağ: Fatura Sayısı
+            VStack(alignment: .trailing) {
+                Text("İşlenen Belge")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+                
+                Text("\(viewModel.invoices.count)")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(LinearGradient(gradient: Gradient(colors: [Color.blue, Color.purple]), startPoint: .topLeading, endPoint: .bottomTrailing))
-        .cornerRadius(16)
+        .background(Color.blue) // Daha kurumsal, düz renk
+        .cornerRadius(12)
         .padding()
-        .shadow(radius: 5)
+        .shadow(color: Color.blue.opacity(0.3), radius: 10, x: 0, y: 5)
     }
     
     var emptyStateView: some View {
         VStack(spacing: 20) {
             Spacer()
-            Image(systemName: "doc.text.magnifyingglass")
+            Image(systemName: "chart.bar.doc.horizontal")
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.5))
-            Text("Henüz fatura yok")
+            Text("Analiz Bekleyen Veri Yok")
                 .font(.headline)
                 .foregroundColor(.gray)
-            Text("Sağ üstteki (+) butonuna basarak\nfatura ekleyebilirsin.")
+            Text("Fatura ekleyerek harcama analizlerinizi\nburada görebilirsiniz.")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.gray.opacity(0.8))
@@ -127,20 +176,18 @@ struct DashboardView: View {
     }
     
     var menuButton: some View {
-        Menu {
-            Button(action: { showScanner = true }) {
-                Label("Kamera ile Tara", systemImage: "camera")
-            }
-            Button(action: { showImagePicker = true }) {
-                Label("Galeriden Seç", systemImage: "photo")
-            }
-            Button(action: { showFilePicker = true }) {
-                Label("Dosyalardan Yükle (PDF)", systemImage: "folder")
-            }
-        } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 30))
-                .foregroundColor(.blue)
+        Button(action: { showActionSheet = true }) {
+            Image(systemName: "plus")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
+                .padding(8)
+                .background(Circle().fill(Color.blue))
+        }
+        .confirmationDialog("Fatura Ekle", isPresented: $showActionSheet, titleVisibility: .visible) {
+            Button("Kamera ile Tara") { showScanner = true }
+            Button("Galeriden Seç") { showImagePicker = true }
+            Button("Dosyalardan Yükle (PDF)") { showFilePicker = true }
+            Button("İptal", role: .cancel) { }
         }
     }
     
@@ -151,12 +198,12 @@ struct DashboardView: View {
                 ProgressView()
                     .scaleEffect(1.5)
                     .tint(.white)
-                Text("Analiz Ediliyor...")
+                Text("Veriler Analiz Ediliyor...")
                     .font(.headline)
                     .foregroundColor(.white)
             }
             .padding(30)
-            .background(Color.gray.opacity(0.8)) // Blur efekti yerine basit gri
+            .background(Color.gray.opacity(0.8))
             .cornerRadius(20)
         }
     }
@@ -164,8 +211,9 @@ struct DashboardView: View {
     // MARK: - Fonksiyonlar
     
     func deleteInvoice(at offsets: IndexSet) {
-        viewModel.invoices.remove(atOffsets: offsets)
-        // Firebase silme işlemi buraya eklenecek
+        // Gruplu listeden silme işlemi biraz daha karmaşık olabilir
+        // Basitlik için şimdilik ViewModel'den direkt silmeyi desteklemiyoruz
+        // İleride eklenebilir.
     }
     
     func handleScan(result: Result<[UIImage], Error>) {

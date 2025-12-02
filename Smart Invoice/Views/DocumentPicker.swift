@@ -3,13 +3,12 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct DocumentPicker: UIViewControllerRepresentable {
-    @Binding var content: Data?
-    @Binding var isPresented: Bool
+    // Artık Data yerine URL döndüreceğiz, çünkü dosyayı kopyalayıp yolunu vereceğiz
     var onSelect: (URL) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        // Sadece PDF ve Resim dosyalarını kabul et
-        let types: [UTType] = [.pdf, .image]
+        // PDF ve Resim türlerini destekle
+        let types: [UTType] = [.pdf, .image, .png, .jpeg]
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
@@ -30,32 +29,37 @@ struct DocumentPicker: UIViewControllerRepresentable {
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            guard let url = urls.first else { 
-                parent.isPresented = false
-                return 
+            guard let selectedURL = urls.first else { return }
+            
+            // 1. Güvenli erişimi başlat
+            let canAccess = selectedURL.startAccessingSecurityScopedResource()
+            
+            defer {
+                if canAccess {
+                    selectedURL.stopAccessingSecurityScopedResource()
+                }
             }
             
-            // Güvenli erişim için
-            guard url.startAccessingSecurityScopedResource() else { 
-                parent.isPresented = false
-                return 
-            }
-            
-            defer { url.stopAccessingSecurityScopedResource() }
-            
+            // 2. Dosyayı uygulamanın kendi "Temp" klasörüne kopyala
+            // Bu adım "Permission Denied" hatasını çözer.
             do {
-                let data = try Data(contentsOf: url)
-                parent.content = data
-                parent.onSelect(url)
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(selectedURL.lastPathComponent)
+                
+                // Eğer eski dosya varsa sil
+                if FileManager.default.fileExists(atPath: tempURL.path) {
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
+                
+                // Dosyayı kopyala
+                try FileManager.default.copyItem(at: selectedURL, to: tempURL)
+                
+                // 3. Artık güvenli olan yerel URL'i geri döndür
+                parent.onSelect(tempURL)
+                
             } catch {
-                print("Dosya okuma hatası: \(error.localizedDescription)")
+                print("❌ Dosya kopyalama hatası: \(error.localizedDescription)")
             }
-            // İşlem bitince kapat
-            parent.isPresented = false
-        }
-        
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            parent.isPresented = false
         }
     }
 }

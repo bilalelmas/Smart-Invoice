@@ -1,117 +1,114 @@
 import Foundation
 
-/// Ham OCR metnini analiz edip yapılandırılmış Fatura verisine çeviren sınıf.
-/// Python projesindeki 'FaturaAnalizMotoru' ve 'ProfileRule' mantığının Swift uyarlamasıdır.
 class InvoiceParser {
     
     static let shared = InvoiceParser()
+    private init() {}
     
-    // Mevcut profilleri listeye ekliyoruz
+    // Satıcı profillerini burada tutuyoruz
     private let profiles: [VendorProfile] = [
         TrendyolProfile(),
         A101Profile(),
         FLOProfile()
     ]
     
-    private init() {}
-    
-    /// OCR'dan gelen ham metni işler ve Fatura objesi döndürür.
-    /// - Parameter text: Vision framework'ten gelen ham metin string'i.
     func parse(text: String) -> Invoice {
-        var invoice = Invoice(userId: "") // Kullanıcı ID sonradan set edilecek
+        var invoice = Invoice(userId: "")
+        let cleanText = text.uppercased() // Büyük harf normalizasyonu
         
-        // 1. Temel Regex ile Veri Çıkarma
-        invoice.merchantName = extractMerchantName(from: text)
-        invoice.invoiceNo = extractInvoiceNumber(from: text)
-        invoice.invoiceDate = extractDate(from: text)
-        invoice.ettn = extractETTN(from: text)
-        invoice.merchantTaxID = extractTaxID(from: text)
-        invoice.totalAmount = extractTotalAmount(from: text)
+        // 1. Temel Veriler
+        invoice.invoiceNo = extractInvoiceNumber(from: cleanText)
+        invoice.invoiceDate = extractDate(from: cleanText)
+        invoice.ettn = extractETTN(from: cleanText)
+        invoice.merchantName = extractMerchantName(from: text) // Orijinal text kullan (Büyük/Küçük harf bozulmasın)
+        invoice.merchantTaxID = extractTaxID(from: cleanText)
         
-        // 2. VENDOR PROFILING (STRATEGY PATTERN)
-        // Metni küçük harfe çevirip profilleri kontrol et
+        // 2. Gelişmiş Tutar Algoritmaları (Analiz edilen faturalara göre)
+        invoice.totalAmount = extractTotalAmount(from: cleanText)
+        invoice.taxAmount = extractTaxAmount(from: cleanText)
+        
+        // 3. Vendor Profiling (Satıcıya özel düzeltmeler)
         let textLower = text.lowercased()
-        
         for profile in profiles {
             if profile.applies(to: textLower) {
-                print("✅ Tespit Edilen Satıcı Profili: \(profile.vendorName)")
-                // Profile özel kuralları uygula
+                print("✅ Profil Uygulandı: \(profile.vendorName)")
                 profile.applyRules(to: &invoice, rawText: text)
-                break // İlk eşleşen profili uygula ve çık
+                break
             }
         }
         
-        // 3. Güven Skoru Hesapla
+        // 4. Güven Skoru
         invoice.confidenceScore = calculateConfidence(invoice: invoice)
         
         return invoice
     }
     
-    // MARK: - Regex Helpers
+    // MARK: - Gelişmiş Tutar Çıkarma Mantığı
     
-    /// Fatura Numarasını Bulur (Örn: GIB2023000000169)
-    /// Standart e-Arşiv Formatı: 3 Karakter Prefix + Yıl + 9 Rakam
-    private func extractInvoiceNumber(from text: String) -> String {
-        // Regex: 3 Büyük harf, ardından 20 ile başlayan yıl, ardından rakamlar
-        let pattern = "[A-Z]{3}20[0-9]{2}[0-9]{9}"
-        return extractString(from: text, pattern: pattern) ?? ""
-    }
-    
-    /// ETTN (UUID) Bulur (Örn: 5D5337B3-19D5-1EDD-B7CA-1CE168725B20)
-    private func extractETTN(from text: String) -> String {
-        let pattern = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
-        return extractString(from: text, pattern: pattern) ?? ""
-    }
-    
-    /// Tarih Bulur (Formatlar: dd.mm.yyyy, dd-mm-yyyy, dd/mm/yyyy)
-    private func extractDate(from text: String) -> Date {
-        // Regex: Gün (01-31) . Ay (01-12) . Yıl (20xx)
-        let pattern = "\\b(0[1-9]|[12][0-9]|3[01])[-./](0[1-9]|1[012])[-./](20\\d{2})\\b"
+    /// Toplam tutarı bulmak için faturayı sondan başa doğru tarar.
+    /// Örnekler: "ÖDENECEK TUTAR 319,90TL", "GENEL TOPLAM 1.664,90"
+    internal func extractTotalAmount(from text: String) -> Double {
+        // En güçlü anahtar kelimelerden en zayıfa doğru sıralı
+        let keywords = [
+            "ÖDENECEK TUTAR",
+            "ODENECEK TUTAR",
+            "GENEL TOPLAM",
+            "TOPLAM TUTAR",
+            "VERGILER DAHIL TOPLAM",
+            "VERGİLER DAHİL TOPLAM TUTAR"
+        ]
         
-        if let dateString = extractString(from: text, pattern: pattern) {
-            // String'i Date objesine çevir (Formatları normalize et)
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "tr_TR")
-            
-            let formats = ["dd.MM.yyyy", "dd-MM-yyyy", "dd/MM/yyyy"]
-            for format in formats {
-                formatter.dateFormat = format
-                if let date = formatter.date(from: dateString) {
-                    return date
+        let lines = text.components(separatedBy: .newlines)
+        
+        // Faturanın alt kısımlarına bakmak için tersten döngü (Reverse Loop)
+        for line in lines.reversed() {
+            for keyword in keywords {
+                if line.contains(keyword) {
+                    // Anahtar kelimeyi bulduk, şimdi sayı avına çıkalım
+                    if let amount = findAmountInString(line) {
+                        return amount
+                    }
                 }
             }
         }
-        return Date() // Bulunamazsa bugünü döndür
-    }
-    
-    /// Vergi Kimlik Numarası (VKN) veya TCKN bulur (10 veya 11 hane)
-    private func extractTaxID(from text: String) -> String {
-        // Genelde "VKN:", "Vergi No:" gibi ön ekler olur ama bazen sadece numara yazar.
-        // Basitlik için 10 veya 11 haneli sayıları arıyoruz.
-        let pattern = "\\b[0-9]{10,11}\\b"
-        // Burada geliştirme yapılabilir: Etrafındaki kelimelere bakılabilir.
-        return extractString(from: text, pattern: pattern) ?? ""
-    }
-    
-    /// Toplam Tutarı Bulur
-    /// Python'daki 'profile_a101.py' dosyasındaki mantığı buraya taşıdık.
-    private func extractTotalAmount(from text: String) -> Double {
-        // Anahtar kelimeler: Toplam, Ödenecek, Genel Toplam
-        // Format: Sayı,Sayı (Türkçe ondalık)
         
-        let keyWords = ["GENEL TOPLAM", "ÖDENECEK TUTAR", "TOPLAM TUTAR", "TOPLAM"]
+        // Eğer satırda bulamazsa, anahtar kelimenin hemen altındaki satıra bak (Bazen kayma olur)
+        for (index, line) in lines.enumerated().reversed() {
+            for keyword in keywords {
+                if line.contains(keyword) {
+                    // Bir sonraki satıra bak (Array bounds kontrolü ile)
+                    if index + 1 < lines.count {
+                        if let amount = findAmountInString(lines[index + 1]) {
+                            return amount
+                        }
+                    }
+                }
+            }
+        }
+        
+        return 0.0
+    }
+    
+    /// KDV Tutarını Bulur
+    internal func extractTaxAmount(from text: String) -> Double {
+        let keywords = [
+            "HESAPLANAN KDV",
+            "TOPLAM KDV",
+            "KDV TUTARI",
+            "HESAPLANAN KATMA DEĞER VERGİSİ", // Teknosa örneği
+            "KDV (%18)",
+            "KDV (%20)",
+            "KDV (%10)"
+        ]
+        
         let lines = text.components(separatedBy: .newlines)
         
-        for keyword in keyWords {
-            // Tersten tarama yap (Toplam genelde alttadır)
-            for line in lines.reversed() {
-                let upperLine = line.uppercased()
-                if upperLine.contains(keyword) {
-                    // Bu satırda sayısal değeri bul
-                    // Regex: Binlik ayraçlı (1.234,56) veya düz (1234,56) formatları destekle
-                    // (\d{1,3}(?:[.,]\d{3})*[.,]\d{2})
-                    if let amountStr = extractString(from: line, pattern: "(\\d{1,3}(?:[.,]\\d{3})*[.,]\\d{2})") {
-                        return normalizeAmount(amountStr)
+        // KDV genelde toplam tutarın biraz üstündedir, yine tersten bakmak mantıklı
+        for line in lines.reversed() {
+            for keyword in keywords {
+                if line.contains(keyword) {
+                    if let amount = findAmountInString(line) {
+                        return amount
                     }
                 }
             }
@@ -119,36 +116,24 @@ class InvoiceParser {
         return 0.0
     }
     
-    /// Satıcı adını tahmin eder
-    /// Genelde ilk satırlarda yer alır.
-    private func extractMerchantName(from text: String) -> String {
-        let lines = text.components(separatedBy: .newlines)
-        // İlk 5 satırı kontrol et, "A.Ş.", "LTD.", "TİC." geçen ilk satırı al
-        for i in 0..<min(lines.count, 5) {
-            let line = lines[i]
-            if line.uppercased().contains("A.Ş") || line.uppercased().contains("LTD") || line.uppercased().contains("TİC") {
-                return line.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-        // Bulunamazsa ilk dolu satırı döndür (Genelde firma adıdır)
-        return lines.first { !$0.isEmpty } ?? ""
-    }
+    // MARK: - Regex Yardımcıları
     
-    // MARK: - Utilities
-    
-    /// Generic Regex String Extractor
-    func extractString(from text: String, pattern: String) -> String? {
+    /// Bir metin satırının içindeki para miktarını çekip Double'a çevirir.
+    /// "1.664,90TL" -> 1664.90
+    /// "319,90 TRY" -> 319.90
+    private func findAmountInString(_ text: String) -> Double? {
+        // 1. Temizlik: Harfleri ve boşlukları at, sadece sayı ve ayraç kalsın
+        // Örn: "1.664,90TL" -> "1.664,90"
+        let pattern = "[0-9.,]+"
+        
         do {
-            let regex = try NSRegularExpression(pattern: pattern, options: [])
-            let nsString = text as NSString
-            let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+            let regex = try NSRegularExpression(pattern: pattern)
+            let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
             
-            if let match = results.first {
-                // Eğer grup yakalama varsa (parenthesis), ilk grubu döndür
-                if match.numberOfRanges > 1 {
-                    return nsString.substring(with: match.range(at: 1))
-                }
-                return nsString.substring(with: match.range)
+            // Satırdaki en son sayıyı almak genelde doğrudur (Örn: "%18 30,36" -> 30.36'yı almak için)
+            if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
+                let amountStr = String(text[range])
+                return normalizeAmount(amountStr)
             }
         } catch {
             print("Regex Hatası: \(error)")
@@ -156,21 +141,107 @@ class InvoiceParser {
         return nil
     }
     
-    /// "1.250,50" -> 1250.50 çevrimi yapar
-    func normalizeAmount(_ amountStr: String) -> Double {
-        // Binlik ayracı (.) kaldır, ondalık ayracı (,) nokta yap
-        var cleanStr = amountStr.replacingOccurrences(of: ".", with: "")
-        cleanStr = cleanStr.replacingOccurrences(of: ",", with: ".")
+    /// Türk Lirası formatını (1.000,50) sisteme (1000.50) çevirir.
+    internal func normalizeAmount(_ amountStr: String) -> Double {
+        var cleanStr = amountStr
+        
+        // Sadece nokta ve virgül ve sayı kalsın
+        cleanStr = cleanStr.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
+        
+        // Eğer hem nokta hem virgül varsa (1.664,90 gibi)
+        if cleanStr.contains(".") && cleanStr.contains(",") {
+            // Noktaları (binlik ayracı) sil
+            cleanStr = cleanStr.replacingOccurrences(of: ".", with: "")
+            // Virgülü (ondalık) noktaya çevir
+            cleanStr = cleanStr.replacingOccurrences(of: ",", with: ".")
+        }
+        // Sadece virgül varsa (319,90 gibi) -> (319.90) yap
+        else if cleanStr.contains(",") {
+            cleanStr = cleanStr.replacingOccurrences(of: ",", with: ".")
+        }
+        // Sadece nokta varsa ve sonda 2 hane varsa (319.90 gibi) -> Dokunma
+        // Sadece nokta var ve sonda 3 hane varsa (1.000 gibi) -> Noktayı sil
+        
         return Double(cleanStr) ?? 0.0
     }
     
-    /// Basit güven skoru hesabı
+    internal func extractString(from text: String, pattern: String) -> String? {
+        do {
+            let regex = try NSRegularExpression(pattern: pattern, options: [])
+            let nsString = text as NSString
+            let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+            if let match = results.first {
+                return nsString.substring(with: match.range)
+            }
+        } catch { return nil }
+        return nil
+    }
+
+    private func extractInvoiceNumber(from text: String) -> String {
+        // Standart 16 haneli (3 harf 13 sayı) veya ETTN formatı
+        // Örn: GIB2023000000169 veya N012024...
+        let pattern = "[A-Z0-9]{3}20[0-9]{2}[0-9]{9}"
+        if let num = extractString(from: text, pattern: pattern) { return num }
+        
+        // Alternatif kısa formatlar için (Bazı e-arşivler)
+        return extractString(from: text, pattern: "\\b[A-Z]{3}[0-9]{13}\\b") ?? ""
+    }
+    
+    private func extractETTN(from text: String) -> String {
+        return extractString(from: text, pattern: "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}") ?? ""
+    }
+    
+    private func extractDate(from text: String) -> Date {
+        // dd/mm/yyyy, dd.mm.yyyy, dd-mm-yyyy formatları
+        let pattern = "\\b(0[1-9]|[12][0-9]|3[01])[-./](0[1-9]|1[012])[-./](20\\d{2})\\b"
+        if let dateStr = extractString(from: text, pattern: pattern) {
+            let formatter = DateFormatter()
+            let formats = ["dd.MM.yyyy", "dd-MM-yyyy", "dd/MM/yyyy"]
+            for f in formats {
+                formatter.dateFormat = f
+                if let date = formatter.date(from: dateStr) { return date }
+            }
+        }
+        return Date()
+    }
+    
+    private func extractMerchantName(from text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        // İlk satırlarda A.Ş, LTD, TİC arayalım
+        for i in 0..<min(lines.count, 6) {
+            let line = lines[i].uppercased()
+            if line.contains("A.Ş") || line.contains("LTD") || line.contains("TİC") || line.contains("SAN") {
+                return lines[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        // Bulamazsak ilk dolu satırı al (Genelde firma adıdır)
+        return lines.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+    }
+    
+    private func extractTaxID(from text: String) -> String {
+        // VKN: veya TCKN: kelimelerinden sonraki 10-11 haneli sayı
+        // Regex: (VKN|TCKN|VERGİ NO)[:\s]*([0-9]{10,11})
+        let pattern = "(?:VKN|TCKN|VERGİ NO|VERGI NO)[:\\s]*([0-9]{10,11})"
+        
+        do {
+            let regex = try NSRegularExpression(pattern: pattern, options: [])
+            let nsString = text as NSString
+            let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+            if let match = results.first, match.numberOfRanges > 1 {
+                 return nsString.substring(with: match.range(at: 1))
+            }
+        } catch {}
+        
+        // Etiketsiz sadece 10-11 hane bulmayı dene (Son çare)
+        return extractString(from: text, pattern: "\\b[0-9]{10,11}\\b") ?? ""
+    }
+    
     private func calculateConfidence(invoice: Invoice) -> Float {
         var score: Float = 0.0
         if !invoice.invoiceNo.isEmpty { score += 0.3 }
-        if invoice.totalAmount > 0 { score += 0.3 }
-        if invoice.invoiceDate < Date() { score += 0.2 } // Gelecek tarihli olamaz
+        if invoice.totalAmount > 0 { score += 0.4 } // Tutar en önemlisi
         if !invoice.merchantName.isEmpty { score += 0.2 }
+        if invoice.taxAmount > 0 { score += 0.1 }
         return score
     }
 }
