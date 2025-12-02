@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 import FirebaseFirestore
 
 /// Fatura süreçlerini (Tarama, Kaydetme, Listeleme) yöneten ViewModel.

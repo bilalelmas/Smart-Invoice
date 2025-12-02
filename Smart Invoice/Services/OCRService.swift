@@ -2,6 +2,7 @@ import Foundation
 import Vision
 import VisionKit
 import UIKit
+import Combine
 
 /// OCR İşlemlerinden sorumlu servis sınıfı.
 /// Python projesindeki 'FaturaRegexAnaliz' sınıfının iOS karşılığıdır.
