@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		74379B3E2EDEF8D100811EC0 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 74379B3D2EDEF8D100811EC0 /* FirebaseAuth */; };
 		74379B402EDEF8D100811EC0 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 74379B3F2EDEF8D100811EC0 /* FirebaseFirestore */; };
+		74379B422EDF06EE00811EC0 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 74379B412EDF06EE00811EC0 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,7 @@
 		7408D2FE2EDD955600127ECD /* Smart Invoice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Smart Invoice.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7408D30D2EDD955700127ECD /* Smart InvoiceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Smart InvoiceTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7408D3172EDD955700127ECD /* Smart InvoiceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Smart InvoiceUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		74379B412EDF06EE00811EC0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -87,6 +89,7 @@
 				7408D31A2EDD955700127ECD /* Smart InvoiceUITests */,
 				74379B3B2EDEF74100811EC0 /* Frameworks */,
 				7408D2FF2EDD955600127ECD /* Products */,
+				74379B412EDF06EE00811EC0 /* GoogleService-Info.plist */,
 			);
 			sourceTree = "<group>";
 		};
@@ -232,6 +235,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				74379B422EDF06EE00811EC0 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -420,6 +424,8 @@
 				DEVELOPMENT_TEAM = 2TPHQV67NJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fatura ve fişlerinizi taramak için kamera erişimi gereklidir.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Galerinizdeki fatura fotoğraflarını yüklemek için izin gereklidir.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -452,6 +458,8 @@
 				DEVELOPMENT_TEAM = 2TPHQV67NJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fatura ve fişlerinizi taramak için kamera erişimi gereklidir.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Galerinizdeki fatura fotoğraflarını yüklemek için izin gereklidir.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
