@@ -2,10 +2,17 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selectedTab: Tab = .home
-    @StateObject private var viewModel = InvoiceViewModel() // ViewModel'i en üstte tutuyoruz
+    @StateObject private var viewModel = InvoiceViewModel()
     
-    // Tab Bar'ı gizlemek için (Örn: Kamera açılınca)
+    // Tab Bar'ı gizlemek için
     @State private var isTabBarHidden = false
+    
+    // Global State (Eskiden DashboardView'daydı)
+    @State private var showActionSheet = false
+    @State private var showScanner = false
+    @State private var showImagePicker = false
+    @State private var showFilePicker = false
+    @State private var selectedImage: UIImage?
     
     enum Tab: String {
         case home
@@ -22,8 +29,7 @@ struct MainTabView: View {
                 case .home:
                     DashboardView(viewModel: viewModel)
                 case .scan:
-                    // Scan butonu özel olduğu için buraya düşmez ama güvenli olsun
-                    Color.clear
+                    Color.clear // Buraya düşmez
                 case .analytics:
                     Text("Analiz Ekranı (Yakında)")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -36,18 +42,89 @@ struct MainTabView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             
+            // Global Loading Overlay
+            if viewModel.isProcessing {
+                Color.black.opacity(0.4).ignoresSafeArea()
+                VStack(spacing: 20) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .tint(.white)
+                    Text("Fiş Analiz Ediliyor...")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                }
+                .padding(30)
+                .background(Material.ultraThinMaterial)
+                .cornerRadius(20)
+            }
+            
             // Custom Tab Bar
             if !isTabBarHidden {
                 CustomTabBar(selectedTab: $selectedTab) {
-                    // Scan butonuna basılınca ne olacak?
-                    // Şimdilik DashboardView içindeki mantığı buraya taşıyacağız
-                    // Faz 2'de burayı detaylandıracağız.
-                    print("Scan Tapped")
+                    showActionSheet = true
                 }
                 .padding(.bottom, 20)
             }
         }
-        .ignoresSafeArea(.keyboard) // Klavye açılınca tab bar yukarı kaymasın
+        .ignoresSafeArea(.keyboard)
+        // MARK: - Global Sheets
+        .confirmationDialog("Fatura Ekle", isPresented: $showActionSheet, titleVisibility: .visible) {
+            Button("Kamera ile Tara") { showScanner = true }
+            Button("Galeriden Seç") { showImagePicker = true }
+            Button("Dosyalardan Yükle (PDF)") { showFilePicker = true }
+            Button("İptal", role: .cancel) { }
+        }
+        .sheet(isPresented: $showScanner) {
+            ScannerView(didFinishScanning: { result in
+                switch result {
+                case .success(let images):
+                    if let firstImage = images.first {
+                        viewModel.scanInvoice(image: firstImage)
+                    }
+                case .failure(let error):
+                    print("Tarama hatası: \(error.localizedDescription)")
+                }
+                showScanner = false
+            }, didCancelScanning: {
+                showScanner = false
+            })
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(selectedImage: $selectedImage, isPresented: $showImagePicker)
+                .onDisappear {
+                    if let img = selectedImage {
+                        viewModel.scanInvoice(image: img)
+                        selectedImage = nil
+                    }
+                }
+        }
+        .sheet(isPresented: $showFilePicker) {
+            DocumentPicker { localUrl in
+                showFilePicker = false
+                let extensionName = localUrl.pathExtension.lowercased()
+                if extensionName == "pdf" {
+                    if let pdfImage = PDFHelper.pdfToImage(url: localUrl) {
+                        viewModel.scanInvoice(image: pdfImage)
+                    }
+                } else if ["jpg", "jpeg", "png"].contains(extensionName) {
+                    if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
+                        viewModel.scanInvoice(image: img)
+                    }
+                }
+            }
+        }
+        // Düzenleme Ekranı (Global)
+        .sheet(item: $viewModel.currentDraftInvoice) { _ in
+            InvoiceEditView(
+                invoice: Binding(
+                    get: { viewModel.currentDraftInvoice ?? Invoice(userId: "") },
+                    set: { viewModel.currentDraftInvoice = $0 }
+                ),
+                onSave: { viewModel.saveInvoice() },
+                onCancel: { viewModel.currentDraftInvoice = nil }
+            )
+        }
     }
 }
 

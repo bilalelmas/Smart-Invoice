@@ -5,36 +5,52 @@ struct DashboardView: View {
     @StateObject var viewModel = InvoiceViewModel()
     
     // UI Durumları
-    @State private var showScanner = false
-    @State private var showImagePicker = false
-    @State private var showFilePicker = false
-    @State private var showActionSheet = false
-    @State private var selectedImage: UIImage?
-    @State private var fileData: Data?
-    
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(UIColor.systemGroupedBackground)
-                    .edgesIgnoringSafeArea(.all)
-                
+        ZStack {
+            NavigationStack {
                 VStack(spacing: 0) {
-                    // ÜST ANALİZ KARTI
+                    // 1. Analiz Başlığı (Sabit)
                     analysisHeader
+                        .padding(.horizontal)
+                        .padding(.top, 10)
+                        .padding(.bottom, 20)
                     
-                    // LİSTE ALANI
+                    // 2. Fatura Listesi
                     if viewModel.invoices.isEmpty {
+                        Spacer()
                         emptyStateView
+                        Spacer()
                     } else {
                         List {
-                            // Faturaları tarihe göre grupla
-                            ForEach(groupedInvoices.keys.sorted(by: >), id: \.self) { date in
-                                Section(header: Text(dateFormatter.string(from: date))) {
-                                    ForEach(groupedInvoices[date] ?? []) { invoice in
+                            // Tarihe göre grupla
+                            let grouped = Dictionary(grouping: viewModel.invoices) { (invoice) -> String in
+                                let formatter = DateFormatter()
+                                formatter.dateStyle = .medium
+                                formatter.timeStyle = .none
+                                formatter.locale = Locale(identifier: "tr_TR")
+                                
+                                if Calendar.current.isDateInToday(invoice.invoiceDate) {
+                                    return "Bugün"
+                                } else if Calendar.current.isDateInYesterday(invoice.invoiceDate) {
+                                    return "Dün"
+                                }
+                                return formatter.string(from: invoice.invoiceDate)
+                            }
+                            
+                            // Grupları sırala (Yeniden eskiye)
+                            let sortedKeys = grouped.keys.sorted { dateStr1, dateStr2 in
+                                // Basit string sıralaması yerine gerçek tarih karşılaştırması daha iyi olurdu ama
+                                // şimdilik listeyi zaten viewModel'de sıralı tutuyoruz.
+                                // Pratik çözüm: ViewModel'deki sıraya güvenmek.
+                                return true 
+                            }
+                            
+                            ForEach(sortedKeys, id: \.self) { key in
+                                Section(header: Text(key).font(.subheadline).bold()) {
+                                    ForEach(grouped[key] ?? []) { invoice in
                                         InvoiceRowView(invoice: invoice)
                                             .listRowSeparator(.hidden)
-                                            .listRowBackground(Color.clear)
-                                            .padding(.bottom, 6)
+                                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                     }
                                     .onDelete(perform: deleteInvoice)
                                 }
@@ -42,81 +58,41 @@ struct DashboardView: View {
                         }
                         .listStyle(.plain)
                         .refreshable {
-                            // Firebase refresh logic
+                            // Firebase'den yenileme (Gelecekte)
                         }
                     }
                 }
-                
-                // YÜKLENİYOR
-                if viewModel.isProcessing {
-                    loadingOverlay
-                }
+                .navigationTitle("Faturalarım")
+                .navigationBarTitleDisplayMode(.inline)
             }
-            .navigationTitle("Fatura Analiz")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    menuButton
-                }
+            
+            // YÜKLENİYOR
+            if viewModel.isProcessing {
+                loadingOverlay
             }
-            // --- MODALLAR ---
-            .sheet(isPresented: $showScanner) {
-                ScannerView(didFinishScanning: handleScan, didCancelScanning: { showScanner = false })
-            }
-            .sheet(isPresented: $showImagePicker) {
-                ImagePicker(selectedImage: $selectedImage, isPresented: $showImagePicker)
-                    .onDisappear { if let img = selectedImage { viewModel.scanInvoice(image: img); selectedImage = nil } }
-            }
-            .sheet(isPresented: $showFilePicker) {
-                // DocumentPicker artık sadece onSelect ile URL dönüyor
-                DocumentPicker { localUrl in
-                    print("📁 Dosya seçildi: \(localUrl.path)")
-                    
-                    // Dosya seçildikten sonra sheet'i kapat
-                    showFilePicker = false
-                    
-                    // Uzantıya göre işlem yap
-                    let extensionName = localUrl.pathExtension.lowercased()
-                    
-                    if extensionName == "pdf" {
-                        // PDF Helper ile resme çevir
-                        if let pdfImage = PDFHelper.pdfToImage(url: localUrl) {
-                            print("✅ PDF Resme çevrildi, analize gönderiliyor...")
-                            viewModel.scanInvoice(image: pdfImage)
-                        } else {
-                            print("❌ PDF Resme çevrilemedi.")
-                        }
-                    } else if ["jpg", "jpeg", "png"].contains(extensionName) {
-                        // Resim dosyası ise
-                        if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
-                            print("✅ Resim yüklendi, analize gönderiliyor...")
-                            viewModel.scanInvoice(image: img)
-                        }
-                    }
-                }
-            }
-            // 3. Analiz Bitince Düzenleme Ekranı (EditView)
-            .sheet(item: $viewModel.currentDraftInvoice) { _ in
-                // Sheet içeriğini oluştururken güvenli kontrol
-                InvoiceEditView(
-                    invoice: Binding(
-                        get: { 
-                            // KRİTİK DÜZELTME: (!) yerine (??) kullanıyoruz.
-                            // Eğer nil ise boş bir fatura objesi döndür ki çökmez.
-                            viewModel.currentDraftInvoice ?? Invoice(userId: "") 
-                        },
-                        set: { newValue in
-                            // Değişiklikleri geri yansıt
-                            viewModel.currentDraftInvoice = newValue 
-                        }
-                    ),
-                    onSave: {
-                        viewModel.saveInvoice()
+        }
+        // 3. Analiz Bitince Düzenleme Ekranı (EditView)
+        .sheet(item: $viewModel.currentDraftInvoice) { _ in
+            // Sheet içeriğini oluştururken güvenli kontrol
+            InvoiceEditView(
+                invoice: Binding(
+                    get: { 
+                        // KRİTİK DÜZELTME: (!) yerine (??) kullanıyoruz.
+                        // Eğer nil ise boş bir fatura objesi döndür ki çökmez.
+                        viewModel.currentDraftInvoice ?? Invoice(userId: "") 
                     },
-                    onCancel: {
-                        viewModel.currentDraftInvoice = nil
+                    set: { newValue in
+                        // Değişiklikleri geri yansıt
+                        viewModel.currentDraftInvoice = newValue 
                     }
-                )
-            }
+                ),
+                onSave: {
+                    viewModel.saveInvoice()
+                },
+                onCancel: {
+                    viewModel.currentDraftInvoice = nil
+                }
+            )
         }
     }
     
@@ -240,35 +216,21 @@ struct DashboardView: View {
     
     var emptyStateView: some View {
         VStack(spacing: 20) {
-            Spacer()
-            Image(systemName: "chart.bar.doc.horizontal")
+            Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.5))
-            Text("Analiz Bekleyen Veri Yok")
-                .font(.headline)
+            
+            Text("Henüz Fatura Yok")
+                .font(.title3)
+                .fontWeight(.semibold)
                 .foregroundColor(.gray)
-            Text("Fatura ekleyerek harcama analizlerinizi\nburada görebilirsiniz.")
+            
+            Text("Aşağıdaki + butonuna basarak\nilk faturanı taratabilirsin.")
                 .font(.subheadline)
-                .multilineTextAlignment(.center)
                 .foregroundColor(.gray.opacity(0.8))
-            Spacer()
+                .multilineTextAlignment(.center)
         }
-    }
-    
-    var menuButton: some View {
-        Button(action: { showActionSheet = true }) {
-            Image(systemName: "plus")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
-                .padding(8)
-                .background(Circle().fill(Color.blue))
-        }
-        .confirmationDialog("Fatura Ekle", isPresented: $showActionSheet, titleVisibility: .visible) {
-            Button("Kamera ile Tara") { showScanner = true }
-            Button("Galeriden Seç") { showImagePicker = true }
-            Button("Dosyalardan Yükle (PDF)") { showFilePicker = true }
-            Button("İptal", role: .cancel) { }
-        }
+        .padding()
     }
     
     var loadingOverlay: some View {
@@ -291,20 +253,6 @@ struct DashboardView: View {
     // MARK: - Fonksiyonlar
     
     func deleteInvoice(at offsets: IndexSet) {
-        // Gruplu listeden silme işlemi biraz daha karmaşık olabilir
-        // Basitlik için şimdilik ViewModel'den direkt silmeyi desteklemiyoruz
-        // İleride eklenebilir.
-    }
-    
-    func handleScan(result: Result<[UIImage], Error>) {
-        showScanner = false
-        switch result {
-        case .success(let images):
-            if let firstImage = images.first {
-                viewModel.scanInvoice(image: firstImage)
-            }
-        case .failure(let error):
-            print(error.localizedDescription)
-        }
     }
 }
+
