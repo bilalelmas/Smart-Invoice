@@ -136,41 +136,107 @@ struct DashboardView: View {
         return formatter
     }
     
-    // MARK: - UI Bileşenleri
-    
+    // MARK: - Analysis Header
     var analysisHeader: some View {
-        HStack(spacing: 20) {
-            // Sol: Toplam Tutar
-            VStack(alignment: .leading) {
-                Text("Toplam Gider")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.8))
-                
-                let total = viewModel.invoices.reduce(0) { $0 + $1.totalAmount }
-                Text("\(total, specifier: "%.2f") ₺")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
+        VStack(spacing: 16) {
+            // Üst Başlık ve Tarih
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Finansal Özet")
+                        .font(.headline)
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("Bu Ay")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                }
+                Spacer()
+                // Belge Sayısı Rozeti
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text.fill")
+                    Text("\(viewModel.invoices.count) Belge")
+                }
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.2))
+                .cornerRadius(20)
+                .foregroundColor(.white)
             }
             
-            Spacer()
-            
-            // Sağ: Fatura Sayısı
-            VStack(alignment: .trailing) {
-                Text("İşlenen Belge")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.8))
+            // Finansal Detaylar (Grid Yapısı)
+            HStack(spacing: 0) {
+                // 1. Matrah (Vergisiz)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Matrah")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(formatCurrency(calculateTotalBaseAmount()))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 
-                Text("\(viewModel.invoices.count)")
-                    .font(.system(size: 24, weight: .bold))
+                // Ayraç
+                Rectangle()
+                    .fill(Color.white.opacity(0.3))
+                    .frame(width: 1, height: 30)
+                
+                // 2. KDV
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Top. KDV")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(formatCurrency(calculateTotalTax()))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.orange) // KDV dikkat çeksin
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 12)
+            }
+            
+            Divider().background(Color.white.opacity(0.3))
+            
+            // 3. Genel Toplam (En Altta Büyük)
+            HStack {
+                Text("Genel Toplam")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.9))
+                Spacer()
+                Text(formatCurrency(calculateTotalAmount()))
+                    .font(.system(size: 28, weight: .bold)) // Daha büyük
                     .foregroundColor(.white)
             }
         }
-        .padding()
-        .background(Color.blue) // Daha kurumsal, düz renk
-        .cornerRadius(12)
-        .padding()
-        .shadow(color: Color.blue.opacity(0.3), radius: 10, x: 0, y: 5)
+        .padding(20)
+        .background(
+            LinearGradient(gradient: Gradient(colors: [Color(hex: "1a2a6c"), Color(hex: "b21f1f")]), startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .cornerRadius(24)
+        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
     }
+    
+    // Yardımcı Hesaplamalar
+    func calculateTotalAmount() -> Double {
+        viewModel.invoices.reduce(0) { $0 + $1.totalAmount }
+    }
+    
+    func calculateTotalTax() -> Double {
+        viewModel.invoices.reduce(0) { $0 + $1.taxAmount }
+    }
+    
+    func calculateTotalBaseAmount() -> Double {
+        calculateTotalAmount() - calculateTotalTax()
+    }
+    
+    func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = Locale(identifier: "tr_TR")
+        return formatter.string(from: NSNumber(value: value)) ?? "₺0,00"
+    }
+    
+    // MARK: - UI Bileşenleri
     
     var emptyStateView: some View {
         VStack(spacing: 20) {

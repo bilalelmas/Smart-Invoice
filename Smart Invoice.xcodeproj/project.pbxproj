@@ -36,22 +36,9 @@
 		74379B412EDF06EE00811EC0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		74379B4D2EDF8D7700811EC0 /* Exceptions for "Smart Invoice" folder in "Smart Invoice" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"Smart-Invoice-Info.plist",
-			);
-			target = 7408D2FD2EDD955600127ECD /* Smart Invoice */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7408D3002EDD955600127ECD /* Smart Invoice */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				74379B4D2EDF8D7700811EC0 /* Exceptions for "Smart Invoice" folder in "Smart Invoice" target */,
-			);
 			path = "Smart Invoice";
 			sourceTree = "<group>";
 		};
