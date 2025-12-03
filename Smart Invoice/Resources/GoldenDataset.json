@@ -1,0 +1,22 @@
+[
+  {
+    "id": "001",
+    "fileName": "sample_invoice_1",
+    "expected": {
+      "merchantName": "TRENDYOL",
+      "totalAmount": 1250.00,
+      "date": "25.10.2023",
+      "taxID": "1234567890"
+    }
+  },
+  {
+    "id": "002",
+    "fileName": "sample_invoice_2",
+    "expected": {
+      "merchantName": "A101",
+      "totalAmount": 45.90,
+      "date": "01.11.2023",
+      "taxID": "9876543210"
+    }
+  }
+]

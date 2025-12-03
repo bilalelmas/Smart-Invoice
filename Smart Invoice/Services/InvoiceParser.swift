@@ -42,15 +42,16 @@ class InvoiceParser {
         invoice.ettn = extractETTN(from: cleanLines, rawText: fullText)
         invoice.invoiceNo = extractInvoiceNumber(from: fullText)
         
-        invoice.totalAmount = extractTotalAmount(from: fullText)
-        invoice.taxAmount = extractTaxAmount(from: fullText)
-        
-        // 4. Tablo Analizi (Spatial Table Parsing)
-        // Eğer blok verisi varsa, konumsal tablo analizi yap
+        // 4. Finansal Veri ve Tablo Analizi
         if !blocks.isEmpty {
             invoice.items = extractLineItemsSpatial(lines: lines)
+            invoice.totalAmount = extractTotalAmountSpatial(lines: lines)
+            invoice.taxAmount = extractTaxAmountSpatial(lines: lines)
+            invoice.subTotal = extractSubTotalSpatial(lines: lines)
         } else {
             invoice.items = extractLineItems(from: cleanLines)
+            invoice.totalAmount = extractTotalAmount(from: fullText)
+            invoice.taxAmount = extractTaxAmount(from: fullText)
         }
         
         // 5. Profil Uygulama
@@ -128,6 +129,26 @@ class InvoiceParser {
                 // Basitçe tarih formatına uyan ilk bloğu işaretleyelim (Genelde doğrudur)
                 invoice.debugRegions.append(OCRRegion(type: .date, rect: block.frame))
                 break 
+            }
+        }
+        
+        // 5. KDV (Mor)
+        if invoice.taxAmount > 0 {
+            for block in blocks {
+                if let amount = findAmountInString(block.text), abs(amount - invoice.taxAmount) < 0.01 {
+                    invoice.debugRegions.append(OCRRegion(type: .tax, rect: block.frame))
+                    break
+                }
+            }
+        }
+        
+        // 6. Ara Toplam (Turuncu)
+        if invoice.subTotal > 0 {
+            for block in blocks {
+                if let amount = findAmountInString(block.text), abs(amount - invoice.subTotal) < 0.01 {
+                    invoice.debugRegions.append(OCRRegion(type: .subTotal, rect: block.frame))
+                    break
+                }
             }
         }
     }
@@ -235,6 +256,71 @@ class InvoiceParser {
         }
         
         return items
+    }
+    
+    // MARK: - 📍 Konumsal Tutar Analizi
+    
+    private func extractTotalAmountSpatial(lines: [TextLine]) -> Double {
+        // Alttan yukarı doğru tara (Genelde toplam en alttadır)
+        for (index, line) in lines.enumerated().reversed() {
+            let upper = line.text.uppercased()
+            
+            // Kara liste kontrolü
+            if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
+            
+            // Hedef kelime kontrolü
+            if RegexPatterns.Keywords.totalAmounts.contains(where: { upper.contains($0) }) {
+                // 1. Aynı satırda ara (En sağdaki değer)
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    return amount
+                }
+                // Blok bazlı bulamazsa tüm satırda ara
+                if let amount = findAmountInString(line.text) {
+                    return amount
+                }
+                
+                // 2. Bir alt satırda ara (Label üstte, değer altta ise)
+                if index + 1 < lines.count {
+                    let nextLine = lines[index + 1]
+                    // Alt satırda sayı varsa ve çok uzak değilse
+                    if let amount = findAmountInString(nextLine.text) {
+                        return amount
+                    }
+                }
+            }
+        }
+        return 0.0
+    }
+    
+    private func extractTaxAmountSpatial(lines: [TextLine]) -> Double {
+        for line in lines.reversed() {
+            let upper = line.text.uppercased()
+            if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) {
+                // En sağdaki değeri al
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    return amount
+                }
+                if let amount = findAmountInString(line.text) {
+                    return amount
+                }
+            }
+        }
+        return 0.0
+    }
+    
+    private func extractSubTotalSpatial(lines: [TextLine]) -> Double {
+        for line in lines.reversed() {
+            let upper = line.text.uppercased()
+            // "TOPLAM" içerip "GENEL" veya "ÖDENECEK" içermeyen satırlar
+            if upper.contains("TOPLAM") && !upper.contains("GENEL") && !upper.contains("ÖDENECEK") && !upper.contains("KDV") {
+                 if let amount = findAmountInString(line.text) { return amount }
+            }
+            // Matrah veya Mal Hizmet
+            if upper.contains("MATRAH") || upper.contains("MAL HIZMET") || upper.contains("MAL HİZMET") {
+                if let amount = findAmountInString(line.text) { return amount }
+            }
+        }
+        return 0.0
     }
     
     // MARK: - Logic with RegexPatterns

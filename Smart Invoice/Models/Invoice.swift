@@ -68,8 +68,27 @@ struct Invoice: Identifiable, Codable {
         self.userId = userId
     }
     
-    // Debug / Görselleştirme Verileri
+    // Debug / Görselleştirme Verileri (Firestore'a kaydedilmez)
     var debugRegions: [OCRRegion] = []
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId
+        case status
+        case createdAt
+        case merchantName
+        case merchantTaxID
+        case merchantAddress
+        case invoiceNo
+        case invoiceDate
+        case ettn
+        case totalAmount
+        case taxAmount
+        case subTotal
+        case items
+        case confidenceScore
+        // debugRegions hariç tutuldu
+    }
 }
 
 /// Görsel Hata Ayıklama için Bölge Modeli
@@ -81,6 +100,8 @@ struct OCRRegion: Identifiable, Codable {
     enum RegionType: String, Codable {
         case seller = "Satıcı Bloğu" // Kırmızı
         case total = "Toplam Tutar"  // Yeşil
+        case subTotal = "Ara Toplam" // Turuncu
+        case tax = "KDV"             // Mor
         case table = "Tablo Alanı"   // Mavi
         case date = "Tarih"          // Sarı
     }

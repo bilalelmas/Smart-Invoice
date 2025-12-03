@@ -66,6 +66,8 @@ struct InvoiceEditView: View {
                                     HStack {
                                         legendItem(color: .red, text: "Satıcı")
                                         legendItem(color: .green, text: "Tutar")
+                                        legendItem(color: .orange, text: "Ara Toplam")
+                                        legendItem(color: .purple, text: "KDV")
                                         legendItem(color: .blue, text: "Tablo")
                                         legendItem(color: .yellow, text: "Tarih")
                                     }
@@ -76,6 +78,10 @@ struct InvoiceEditView: View {
                         
                         // 1. Güven Skoru Kartı
                         confidenceCard
+                        
+                        // ...
+                        
+
                         
                         // 2. Satıcı Bilgileri
                         VStack(alignment: .leading, spacing: 16) {
@@ -125,6 +131,17 @@ struct InvoiceEditView: View {
                                     .multilineTextAlignment(.trailing)
                                     .font(.title3.bold())
                                     .foregroundColor(.blue)
+                            }
+                            
+                            Divider()
+                            
+                            HStack {
+                                Text("Ara Toplam (Matrah)")
+                                    .font(.subheadline)
+                                Spacer()
+                                TextField("0.00", value: $invoice.subTotal, formatter: currencyFormatter)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
                             }
                             
                             Divider()
@@ -217,6 +234,8 @@ func colorForRegion(_ type: OCRRegion.RegionType) -> Color {
     switch type {
     case .seller: return .red
     case .total: return .green
+    case .subTotal: return .orange
+    case .tax: return .purple
     case .table: return .blue
     case .date: return .yellow
     }
