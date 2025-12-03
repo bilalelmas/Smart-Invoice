@@ -5,7 +5,6 @@ class InvoiceParser {
     static let shared = InvoiceParser()
     private init() {}
     
-    // Satıcı profillerini burada tutuyoruz
     private let profiles: [VendorProfile] = [
         TrendyolProfile(),
         A101Profile(),
@@ -13,257 +12,307 @@ class InvoiceParser {
     ]
     
     func parse(text: String) -> Invoice {
-        print("🔍 OCR ÇIKTISI BAŞLANGIÇ ---")
-        print(text)
-        print("🔍 OCR ÇIKTISI BİTİŞ ---")
-        
         var invoice = Invoice(userId: "")
-        let cleanText = text.uppercased() // Büyük harf normalizasyonu
         
-        // 1. Temel Veriler
-        invoice.invoiceNo = extractInvoiceNumber(from: cleanText)
-        invoice.invoiceDate = extractDate(from: cleanText)
-        invoice.ettn = extractETTN(from: cleanText)
-        invoice.merchantName = extractMerchantName(from: text) // Orijinal text kullan (Büyük/Küçük harf bozulmasın)
-        invoice.merchantTaxID = extractTaxID(from: cleanText)
+        // Temizlik
+        let cleanText = text.replacingOccurrences(of: "\"", with: "")
+        let lines = cleanText.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         
-        // 2. Gelişmiş Tutar Algoritmaları (Analiz edilen faturalara göre)
-        invoice.totalAmount = extractTotalAmount(from: cleanText)
-        invoice.taxAmount = extractTaxAmount(from: cleanText)
+        // Blok Ayrıştırma
+        let sellerBlock = extractSellerBlock(from: lines)
         
-        // 3. Vendor Profiling (Satıcıya özel düzeltmeler)
-        let textLower = text.lowercased()
+        // Veri Çıkarımı (Artık RegexPatterns kullanıyor)
+        invoice.merchantName = extractMerchantName(from: sellerBlock)
+        invoice.merchantTaxID = extractMerchantTaxID(from: sellerBlock)
+        invoice.invoiceDate = extractDate(from: lines)
+        invoice.ettn = extractETTN(from: lines, rawText: cleanText)
+        invoice.invoiceNo = extractInvoiceNumber(from: text)
+        
+        let fullText = lines.joined(separator: "\n")
+        invoice.totalAmount = extractTotalAmount(from: fullText)
+        invoice.taxAmount = extractTaxAmount(from: fullText)
+        invoice.items = extractLineItems(from: lines)
+        
+        // Profil Uygulama
+        let textLower = fullText.lowercased()
         for profile in profiles {
             if profile.applies(to: textLower) {
-                print("✅ Profil Uygulandı: \(profile.vendorName)")
-                profile.applyRules(to: &invoice, rawText: text)
+                print("✅ Profil Devrede: \(profile.vendorName)")
+                profile.applyRules(to: &invoice, rawText: fullText)
                 break
             }
         }
         
-        // 4. Güven Skoru
-        invoice.confidenceScore = calculateConfidence(invoice: invoice)
-        
+        invoice.confidenceScore = calculateRealConfidence(invoice: invoice)
         return invoice
     }
     
-    // MARK: - Gelişmiş Tutar Çıkarma Mantığı (DÜZELTİLDİ)
+    // MARK: - Logic with RegexPatterns
     
     internal func extractTotalAmount(from text: String) -> Double {
-        // Aranacak anahtar kelimeler (Önem sırasına göre)
-        let keywords = [
-            "ÖDENECEK TUTAR",
-            "ODENECEK TUTAR",
-            "GENEL TOPLAM",
-            "TOPLAM TUTAR",
-            "VERGİLER DAHİL",
-            "VERGILER DAHIL"
-        ]
-        
-        // Yasaklı kelimeler (Bu kelimelerin olduğu satırları toplam sanma!)
-        let blackList = [
-            "HARIÇ", "HARIC", "MATRAH", "NET TUTAR", "KDVSİZ", "KDV'SİZ"
-        ]
-        
         let lines = text.components(separatedBy: .newlines)
         var candidates: [Double] = []
         
-        // 1. ADIM: Satır satır gez ve adayları topla
         for line in lines.reversed() {
-            let upperLine = line.uppercased()
+            let upper = line.uppercased()
             
-            // Eğer satırda "Hariç" veya "Matrah" yazıyorsa o satırı atla!
-            // Bu sayede "Mal Hizmet Toplamı (Vergi Hariç)" satırını eleriz.
-            if blackList.contains(where: { upperLine.contains($0) }) {
-                continue
-            }
+            // RegexPatterns'den gelen kara liste
+            if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
             
-            // Anahtar kelimelerden biri geçiyor mu?
-            if keywords.contains(where: { upperLine.contains($0) }) {
+            // RegexPatterns'den gelen hedef kelimeler
+            if RegexPatterns.Keywords.totalAmounts.contains(where: { upper.contains($0) }) {
                 if let amount = findAmountInString(line) {
                     candidates.append(amount)
                 }
             }
         }
         
-        // 2. ADIM: "ÖDENECEK TUTAR" etiketini özel olarak bir daha kontrol et (Kesinlik için)
-        // Bazen etiket ve fiyat alt alta olabilir, bu yüzden satırın kendisinde yoksa altına bak.
+        // "Ödenecek" alt satır kontrolü
         for (index, line) in lines.enumerated().reversed() {
-            if line.uppercased().contains("ÖDENECEK TUTAR") || line.uppercased().contains("ODENECEK TUTAR") {
-                // Aynı satırda bulamazsa bir alt satıra bak
-                if let amount = findAmountInString(line) {
-                    candidates.append(amount)
-                } else if index + 1 < lines.count {
+            if line.uppercased().contains("ÖDENECEK") || line.uppercased().contains("GENEL TOPLAM") {
+                 if index + 1 < lines.count {
                      if let amount = findAmountInString(lines[index + 1]) {
                          candidates.append(amount)
                      }
-                }
-            }
-        }
-
-        // 3. ADIM: Matematiksel Garanti (Max Value Strategy)
-        // Bir faturada "Ara Toplam", "KDV" ve "Genel Toplam" varsa;
-        // En büyük sayı HER ZAMAN "Genel Toplam"dır.
-        if let maxAmount = candidates.max() {
-            return maxAmount
+                 }
+             }
         }
         
-        return 0.0
+        return candidates.max() ?? 0.0
     }
     
-    /// KDV Tutarını Bulur
-    internal func extractTaxAmount(from text: String) -> Double {
-        let keywords = [
-            "HESAPLANAN KDV",
-            "TOPLAM KDV",
-            "KDV TUTARI",
-            "HESAPLANAN KATMA DEĞER VERGİSİ", // Teknosa örneği
-            "KDV (%18)",
-            "KDV (%20)",
-            "KDV (%10)"
-        ]
-        
-        let lines = text.components(separatedBy: .newlines)
-        
-        // KDV genelde toplam tutarın biraz üstündedir, yine tersten bakmak mantıklı
-        for line in lines.reversed() {
-            for keyword in keywords {
-                if line.contains(keyword) {
-                    if let amount = findAmountInString(line) {
-                        return amount
-                    }
-                }
-            }
-        }
-        return 0.0
-    }
-    
-    // MARK: - Regex Yardımcıları
-    
-    /// Bir metin satırının içindeki para miktarını çekip Double'a çevirir.
-    /// "1.664,90TL" -> 1664.90
-    /// "319,90 TRY" -> 319.90
     private func findAmountInString(_ text: String) -> Double? {
-        // 1. Temizlik: Harfleri ve boşlukları at, sadece sayı ve ayraç kalsın
-        // Örn: "1.664,90TL" -> "1.664,90"
-        let pattern = "[0-9.,]+"
-        
-        do {
-            let regex = try NSRegularExpression(pattern: pattern)
-            let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-            
-            // Satırdaki en son sayıyı almak genelde doğrudur (Örn: "%18 30,36" -> 30.36'yı almak için)
-            if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
-                let amountStr = String(text[range])
-                return normalizeAmount(amountStr)
-            }
-        } catch {
-            print("Regex Hatası: \(error)")
+        // RegexPatterns.Amount.flexible kullanımı
+        if let match = extractString(from: text, pattern: RegexPatterns.Amount.flexible) {
+            // Yıl kontrolü (2024, 2025 karışmasın)
+            if match.count == 4 && (match.starts(with: "202")) { return nil }
+            return normalizeAmount(match)
         }
-        return nil
-    }
-    
-    /// Türk Lirası formatını (1.000,50) sisteme (1000.50) çevirir.
-    internal func normalizeAmount(_ amountStr: String) -> Double {
-        var cleanStr = amountStr
-        
-        // Sadece nokta ve virgül ve sayı kalsın
-        cleanStr = cleanStr.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
-        
-        // Eğer hem nokta hem virgül varsa (1.664,90 gibi)
-        if cleanStr.contains(".") && cleanStr.contains(",") {
-            // Noktaları (binlik ayracı) sil
-            cleanStr = cleanStr.replacingOccurrences(of: ".", with: "")
-            // Virgülü (ondalık) noktaya çevir
-            cleanStr = cleanStr.replacingOccurrences(of: ",", with: ".")
-        }
-        // Sadece virgül varsa (319,90 gibi) -> (319.90) yap
-        else if cleanStr.contains(",") {
-            cleanStr = cleanStr.replacingOccurrences(of: ",", with: ".")
-        }
-        // Sadece nokta varsa ve sonda 2 hane varsa (319.90 gibi) -> Dokunma
-        // Sadece nokta var ve sonda 3 hane varsa (1.000 gibi) -> Noktayı sil
-        
-        return Double(cleanStr) ?? 0.0
-    }
-    
-    internal func extractString(from text: String, pattern: String) -> String? {
-        do {
-            let regex = try NSRegularExpression(pattern: pattern, options: [])
-            let nsString = text as NSString
-            let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
-            if let match = results.first {
-                return nsString.substring(with: match.range)
-            }
-        } catch { return nil }
         return nil
     }
 
-    private func extractInvoiceNumber(from text: String) -> String {
-        // Standart 16 haneli (3 harf 13 sayı) veya ETTN formatı
-        // Örn: GIB2023000000169 veya N012024...
-        let pattern = "[A-Z0-9]{3}20[0-9]{2}[0-9]{9}"
-        if let num = extractString(from: text, pattern: pattern) { return num }
+    private func extractMerchantTaxID(from sellerLines: [String]) -> String {
+        // 1. Etiketli VKN Ara
+        for line in sellerLines {
+            if line.uppercased().contains("VKN") || line.uppercased().contains("VERGI") {
+                if let id = extractString(from: line, pattern: RegexPatterns.ID.vkn) { return id }
+            }
+        }
         
-        // Alternatif kısa formatlar için (Bazı e-arşivler)
-        return extractString(from: text, pattern: "\\b[A-Z]{3}[0-9]{13}\\b") ?? ""
+        // 2. Etiketli TCKN Ara
+        for line in sellerLines {
+            if line.uppercased().contains("TCKN") || line.uppercased().contains("TC KIMLIK") {
+                if let id = extractString(from: line, pattern: RegexPatterns.ID.tckn) { return id }
+            }
+        }
+        
+        // 3. Etiketsiz Ara
+        for line in sellerLines {
+            let upper = line.uppercased()
+            if upper.contains("SICIL") || upper.contains("MERSIS") || isPhoneNumber(line) { continue }
+            
+            // 10 veya 11 hane (İki deseni birleştiriyoruz)
+            if let id = extractString(from: line, pattern: "\\b[0-9]{10,11}\\b") { return id }
+        }
+        
+        return ""
     }
     
-    private func extractETTN(from text: String) -> String {
-        return extractString(from: text, pattern: "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}") ?? ""
-    }
-    
-    private func extractDate(from text: String) -> Date {
-        // dd/mm/yyyy, dd.mm.yyyy, dd-mm-yyyy formatları
-        let pattern = "\\b(0[1-9]|[12][0-9]|3[01])[-./](0[1-9]|1[012])[-./](20\\d{2})\\b"
-        if let dateStr = extractString(from: text, pattern: pattern) {
-            let formatter = DateFormatter()
-            let formats = ["dd.MM.yyyy", "dd-MM-yyyy", "dd/MM/yyyy"]
-            for f in formats {
-                formatter.dateFormat = f
-                if let date = formatter.date(from: dateStr) { return date }
+    private func extractDate(from lines: [String]) -> Date {
+        // Etiketli Arama
+        for line in lines {
+            let upper = line.uppercased()
+            if RegexPatterns.Keywords.dateTargets.contains(where: { upper.contains($0) }) &&
+               !RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) {
+                if let d = extractString(from: line, pattern: RegexPatterns.DateFormat.standard) { return parseDateString(d) }
+            }
+        }
+        
+        // Genel Arama (Header bölgesinde)
+        let limit = min(lines.count, 20)
+        for i in 0..<limit {
+            let line = lines[i]
+            if RegexPatterns.Keywords.dateBlacklist.contains(where: { line.uppercased().contains($0) }) { continue }
+            
+            if let d = extractString(from: line, pattern: RegexPatterns.DateFormat.standard) {
+                return parseDateString(d)
             }
         }
         return Date()
     }
     
-    private func extractMerchantName(from text: String) -> String {
-        let lines = text.components(separatedBy: .newlines)
-        // İlk satırlarda A.Ş, LTD, TİC arayalım
-        for i in 0..<min(lines.count, 6) {
-            let line = lines[i].uppercased()
-            if line.contains("A.Ş") || line.contains("LTD") || line.contains("TİC") || line.contains("SAN") {
-                return lines[i].trimmingCharacters(in: .whitespacesAndNewlines)
+    private func extractLineItems(from lines: [String]) -> [InvoiceItem] {
+        var items: [InvoiceItem] = []
+        
+        // Tablo Başlangıcı
+        guard let headerIndex = lines.firstIndex(where: { line in
+            RegexPatterns.Keywords.tableHeaders.contains(where: { line.uppercased().contains($0) })
+        }) else { return [] }
+        
+        // Tablo Bitişi
+        let footerIndex = lines.indices.first(where: { index in
+            index > headerIndex && RegexPatterns.Keywords.tableFooters.contains(where: { lines[index].uppercased().contains($0) })
+        }) ?? lines.count
+        
+        // Satır İşleme
+        for line in lines[(headerIndex + 1)..<footerIndex] {
+            if line.count < 5 { continue }
+            
+            // Satırdaki SON fiyatı bul
+            if let amountMatch = extractLastMatch(from: line, pattern: RegexPatterns.Amount.flexible) {
+                // Yıl kontrolü
+                if amountMatch.count == 4 && amountMatch.starts(with: "202") { continue }
+                
+                let amount = normalizeAmount(amountMatch)
+                // Ürün Adı Temizliği
+                let name = line.replacingOccurrences(of: RegexPatterns.Amount.flexible, with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "TL", with: "")
+                    .replacingOccurrences(of: "Adet", with: "")
+                
+                if !name.isEmpty && amount > 0 {
+                    items.append(InvoiceItem(name: name, quantity: 1, unitPrice: amount, total: amount, taxRate: 18))
+                }
             }
         }
-        // Bulamazsak ilk dolu satırı al (Genelde firma adıdır)
-        return lines.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+        return items
     }
     
-    private func extractTaxID(from text: String) -> String {
-        // VKN: veya TCKN: kelimelerinden sonraki 10-11 haneli sayı
-        // Regex: (VKN|TCKN|VERGİ NO)[:\s]*([0-9]{10,11})
-        let pattern = "(?:VKN|TCKN|VERGİ NO|VERGI NO)[:\\s]*([0-9]{10,11})"
-        
+    private func extractMerchantName(from sellerLines: [String]) -> String {
+        for line in sellerLines {
+            let upper = line.uppercased()
+            if RegexPatterns.Keywords.merchantBlacklist.contains(where: { upper.contains($0) }) { continue }
+            if isPhoneNumber(line) { continue }
+            
+            if RegexPatterns.Keywords.companySuffixes.contains(where: { upper.contains($0) }) {
+                return line
+            }
+        }
+        // Fallback (Marka adı)
+        for line in sellerLines {
+            let upper = line.uppercased()
+            if line.count > 3 &&
+               !RegexPatterns.Keywords.merchantBlacklist.contains(where: { upper.contains($0) }) &&
+               !isPhoneNumber(line) && !upper.contains("NO:") {
+                return line
+            }
+        }
+        return ""
+    }
+    
+    private func extractSellerBlock(from lines: [String]) -> [String] {
+        for (index, line) in lines.enumerated() {
+            if RegexPatterns.Keywords.splitters.contains(where: { line.uppercased().contains($0) }) {
+                if index < 1 { return Array(lines.prefix(5)) }
+                return Array(lines.prefix(index))
+            }
+        }
+        return Array(lines.prefix(12))
+    }
+    
+    private func extractETTN(from lines: [String], rawText: String) -> String {
+        for line in lines {
+            if line.uppercased().contains("ETTN") {
+                let words = line.components(separatedBy: .whitespaces)
+                if let lastWord = words.last, lastWord.count > 20 {
+                    return cleanETTN(lastWord)
+                }
+            }
+        }
+        if let raw = extractString(from: rawText, pattern: RegexPatterns.ID.ettn) {
+            return cleanETTN(raw)
+        }
+        return ""
+    }
+    
+    private func extractInvoiceNumber(from text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines {
+            if line.contains("IRSALIYE") || line.contains("SIPARIS") || line.contains("SİPARİŞ") || line.contains("REF") { continue }
+            
+            // 1. Standart Ara
+            if let num = extractString(from: line, pattern: RegexPatterns.InvoiceNo.standard) { return num }
+            
+            // 2. A101 Özel Ara
+            if let num = extractString(from: line, pattern: RegexPatterns.InvoiceNo.a101) { return num }
+            
+            // 3. Kısa Format Ara (Etiketli)
+            if line.contains("FATURA NO") || line.contains("FATURA NUMARASI") {
+                if let num = extractString(from: line, pattern: RegexPatterns.InvoiceNo.short) { return num }
+            }
+        }
+        // Genel Tarama
+        if let num = extractString(from: text, pattern: RegexPatterns.InvoiceNo.standard) { return num }
+        return ""
+    }
+    
+    // --- Helper Functions ---
+    
+    internal func extractTaxAmount(from text: String) -> Double {
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines.reversed() {
+            let upper = line.uppercased()
+            if (upper.contains("KDV") && upper.contains("TOPLAM")) || upper.contains("HESAPLANAN KDV") || upper.contains("KDV TUTARI") {
+                if let amount = findAmountInString(line) { return amount }
+            }
+        }
+        return 0.0
+    }
+    
+    internal func extractLastMatch(from text: String, pattern: String) -> String? {
         do {
-            let regex = try NSRegularExpression(pattern: pattern, options: [])
-            let nsString = text as NSString
-            let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
-            if let match = results.first, match.numberOfRanges > 1 {
-                 return nsString.substring(with: match.range(at: 1))
+            let regex = try NSRegularExpression(pattern: pattern)
+            let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
+                return String(text[range])
             }
         } catch {}
-        
-        // Etiketsiz sadece 10-11 hane bulmayı dene (Son çare)
-        return extractString(from: text, pattern: "\\b[0-9]{10,11}\\b") ?? ""
+        return nil
     }
     
-    private func calculateConfidence(invoice: Invoice) -> Float {
+    private func cleanETTN(_ text: String) -> String {
+        var t = text.replacingOccurrences(of: "ETTN", with: "").replacingOccurrences(of: ":", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.replacingOccurrences(of: "l", with: "1").replacingOccurrences(of: "O", with: "0")
+        return t.lowercased()
+    }
+    
+    private func isPhoneNumber(_ text: String) -> Bool {
+        let c = text.replacingOccurrences(of: " ", with: "")
+        return c.hasPrefix("+9") || c.hasPrefix("05") || c.contains("TEL")
+    }
+    
+    private func parseDateString(_ s: String) -> Date {
+        let f = DateFormatter()
+        for fmt in ["dd.MM.yyyy", "dd/MM/yyyy", "dd-MM-yyyy"] { f.dateFormat = fmt; if let d = f.date(from: s) { return d } }
+        return Date()
+    }
+    
+    internal func normalizeAmount(_ amountStr: String) -> Double {
+        var s = amountStr.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
+        if s.contains(".") && s.contains(",") { s = s.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".") }
+        else if s.contains(",") { s = s.replacingOccurrences(of: ",", with: ".") }
+        return Double(s) ?? 0.0
+    }
+    
+    internal func extractString(from text: String, pattern: String) -> String? {
+        do {
+            let r = try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+            let res = r.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            if let m = res.first { return String(text[Range(m.range, in: text)!]) }
+        } catch {}
+        return nil
+    }
+    
+    private func calculateRealConfidence(invoice: Invoice) -> Float {
         var score: Float = 0.0
-        if !invoice.invoiceNo.isEmpty { score += 0.3 }
-        if invoice.totalAmount > 0 { score += 0.4 } // Tutar en önemlisi
-        if !invoice.merchantName.isEmpty { score += 0.2 }
-        if invoice.taxAmount > 0 { score += 0.1 }
-        return score
+        var checks: Float = 0.0
+        checks += 1; if !invoice.merchantName.isEmpty { score += 1 }
+        checks += 1; if !invoice.merchantTaxID.isEmpty { score += 1 }
+        checks += 1; if invoice.totalAmount > 0 { score += 1 }
+        checks += 1; if invoice.ettn.count > 20 { score += 1 }
+        if invoice.totalAmount == 0 { return (score / checks) * 0.5 }
+        return score / checks
     }
 }
