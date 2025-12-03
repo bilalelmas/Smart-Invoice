@@ -6,13 +6,51 @@ struct InvoiceEditView: View {
     var onCancel: () -> Void
     var image: UIImage? // Debug için görsel
     
-    // Para birimi formatlayıcı
+    // Para birimi formatlayıcı (sadece gösterim için)
     private let currencyFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "TRY"
+        formatter.locale = Locale(identifier: "tr_TR")
         return formatter
     }()
+    
+    // Fiyat alanları için String state'leri (düzenleme kolaylığı için)
+    @State private var totalAmountText: String = ""
+    @State private var subTotalText: String = ""
+    @State private var taxAmountText: String = ""
+    @State private var isInitialized: Bool = false
+    
+    // View yüklendiğinde değerleri String'e çevir (sadece ilk yüklemede)
+    private func initializeAmountTexts() {
+        guard !isInitialized else { return }
+        // Invoice değerlerinden String'e çevir
+        totalAmountText = formatAmountForEditing(invoice.totalAmount)
+        subTotalText = formatAmountForEditing(invoice.subTotal)
+        taxAmountText = formatAmountForEditing(invoice.taxAmount)
+        isInitialized = true
+    }
+    
+    // Tutarı düzenlenebilir formata çevir (nokta/ virgül olmadan)
+    private func formatAmountForEditing(_ amount: Double) -> String {
+        if amount == 0 { return "" }
+        // Türkçe format: 1250.50 -> "1250,50"
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.decimalSeparator = ","
+        formatter.groupingSeparator = "."
+        formatter.locale = Locale(identifier: "tr_TR")
+        return formatter.string(from: NSNumber(value: amount)) ?? ""
+    }
+    
+    // String'den Double'a çevir
+    private func parseAmount(_ text: String) -> Double {
+        let cleaned = text.replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        return Double(cleaned) ?? 0.0
+    }
     
     var body: some View {
         NavigationStack {
@@ -123,11 +161,14 @@ struct InvoiceEditView: View {
                                 Text("Toplam Tutar")
                                     .font(.headline)
                                 Spacer()
-                                TextField("0.00", value: $invoice.totalAmount, formatter: currencyFormatter)
+                                TextField("0,00", text: $totalAmountText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .font(.title3.bold())
                                     .foregroundColor(.blue)
+                                    .onChange(of: totalAmountText) { newValue in
+                                        invoice.totalAmount = parseAmount(newValue)
+                                    }
                             }
                             
                             Divider()
@@ -136,9 +177,12 @@ struct InvoiceEditView: View {
                                 Text("Ara Toplam (Matrah)")
                                     .font(.subheadline)
                                 Spacer()
-                                TextField("0.00", value: $invoice.subTotal, formatter: currencyFormatter)
+                                TextField("0,00", text: $subTotalText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
+                                    .onChange(of: subTotalText) { newValue in
+                                        invoice.subTotal = parseAmount(newValue)
+                                    }
                             }
                             
                             Divider()
@@ -147,9 +191,12 @@ struct InvoiceEditView: View {
                                 Text("KDV")
                                     .font(.subheadline)
                                 Spacer()
-                                TextField("0.00", value: $invoice.taxAmount, formatter: currencyFormatter)
+                                TextField("0,00", text: $taxAmountText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
+                                    .onChange(of: taxAmountText) { newValue in
+                                        invoice.taxAmount = parseAmount(newValue)
+                                    }
                             }
                         }
                         .padding()
@@ -158,7 +205,13 @@ struct InvoiceEditView: View {
                         .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
                         
                         // Kaydet Butonu
-                        Button(action: onSave) {
+                        Button(action: {
+                            // Son değişiklikleri kaydet
+                            invoice.totalAmount = parseAmount(totalAmountText)
+                            invoice.subTotal = parseAmount(subTotalText)
+                            invoice.taxAmount = parseAmount(taxAmountText)
+                            onSave()
+                        }) {
                             Text("Değişiklikleri Onayla ve Kaydet")
                                 .font(.headline)
                                 .foregroundColor(.white)
@@ -180,6 +233,15 @@ struct InvoiceEditView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("İptal") { onCancel() }
+                }
+            }
+            .onAppear {
+                initializeAmountTexts()
+            }
+            .onChange(of: invoice.totalAmount) { _ in
+                // Invoice değerleri değiştiğinde (dışarıdan güncelleme) state'leri güncelle
+                if !isInitialized {
+                    initializeAmountTexts()
                 }
             }
         }

@@ -31,7 +31,25 @@ struct TrendyolProfile: VendorProfile {
             }
         }
         
-        // Satıcı adını sabitle (OCR bazen yanlış okuyabilir)
-        invoice.merchantName = "DSM Grup Danışmanlık (Trendyol)"
+        // Trendyol pazaryeri faturalarında satıcı tespiti:
+        // extractMerchantName zaten sol üst bloğun ilk satırını buluyor
+        // Eğer bu satır "DSM Grup" içermiyorsa, bu gerçek satıcıdır (pazaryeri üzerinden satış yapan)
+        // Eğer "DSM Grup" içeriyorsa, bu Trendyol'un kendi faturasıdır
+        
+        let currentName = invoice.merchantName.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Eğer satıcı adı DSM Grup içermiyorsa, bu gerçek satıcıdır - olduğu gibi bırak
+        if !currentName.contains("DSM GRUP") && !currentName.contains("TRENDYOL") {
+            // Gerçek satıcı bulundu, değişiklik yapma
+            return
+        }
+        
+        // Eğer DSM Grup ise, bu Trendyol'un kendi faturası
+        // Pazaryeri olduğunu belirt (isteğe bağlı, kullanıcı deneyimi için)
+        if currentName.contains("DSM GRUP") {
+            // Trendyol'un kendi faturası - mevcut ismi koru
+            // İsterseniz "(Pazaryeri)" ekleyebilirsiniz ama genelde gerek yok
+            // Çünkü zaten Trendyol profili aktif olduğu için pazaryeri olduğu anlaşılıyor
+        }
     }
 }

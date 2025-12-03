@@ -65,7 +65,12 @@ class InvoiceParser {
         // 3. Veri Çıkarımı
         invoice.merchantName = extractMerchantName(from: sellerBlock)
         invoice.merchantTaxID = extractMerchantTaxID(from: sellerBlock)
-        invoice.invoiceDate = extractDate(from: cleanLines)
+        // Tarih çıkarımı: Önce bloklardan spatial bilgi kullan, yoksa cleanLines'dan
+        if !blocks.isEmpty {
+            invoice.invoiceDate = extractDateSpatial(blocks: blocks, lines: lines) ?? extractDate(from: cleanLines)
+        } else {
+            invoice.invoiceDate = extractDate(from: cleanLines)
+        }
         invoice.ettn = extractETTN(from: cleanLines, rawText: fullText)
         invoice.invoiceNo = extractInvoiceNumber(from: fullText)
         
@@ -429,6 +434,53 @@ class InvoiceParser {
         return ""
     }
     
+    /// Konumsal analiz ile tarih çıkarımı (bloklardan)
+    private func extractDateSpatial(blocks: [TextBlock], lines: [TextLine]) -> Date? {
+        let datePattern = RegexPatterns.DateFormat.standard
+        
+        // 1. Önce etiketli satırlarda ara (FATURA TARİHİ, DÜZENLEME TARİHİ vb.)
+        for line in lines {
+            let upper = line.text.uppercased()
+            if RegexPatterns.Keywords.dateTargets.contains(where: { upper.contains($0) }) &&
+               !RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) {
+                // Aynı satırdaki bloklarda tarih ara
+                for block in line.blocks {
+                    if let dateStr = extractString(from: block.text, pattern: datePattern) {
+                        return parseDateString(dateStr)
+                    }
+                }
+                // Satır metninde ara
+                if let dateStr = extractString(from: line.text, pattern: datePattern) {
+                    return parseDateString(dateStr)
+                }
+            }
+        }
+        
+        // 2. Üst bölgede (ilk 20 satır) genel arama
+        let limit = min(lines.count, 20)
+        for i in 0..<limit {
+            let line = lines[i]
+            let upper = line.text.uppercased()
+            
+            // Kara listede varsa atla
+            if RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) { continue }
+            
+            // Satırdaki bloklarda ara
+            for block in line.blocks {
+                if let dateStr = extractString(from: block.text, pattern: datePattern) {
+                    return parseDateString(dateStr)
+                }
+            }
+            
+            // Satır metninde ara
+            if let dateStr = extractString(from: line.text, pattern: datePattern) {
+                return parseDateString(dateStr)
+            }
+        }
+        
+        return nil
+    }
+    
     private func extractDate(from lines: [String]) -> Date {
         // Etiketli Arama
         for line in lines {
@@ -581,7 +633,19 @@ class InvoiceParser {
     
     private func parseDateString(_ s: String) -> Date {
         let f = DateFormatter()
-        for fmt in ["dd.MM.yyyy", "dd/MM/yyyy", "dd-MM-yyyy"] { f.dateFormat = fmt; if let d = f.date(from: s) { return d } }
+        f.locale = Locale(identifier: "tr_TR") // Türkçe locale
+        f.timeZone = TimeZone.current
+        
+        // Tarih formatlarını dene
+        let formats = ["dd.MM.yyyy", "dd/MM/yyyy", "dd-MM-yyyy", "d.M.yyyy", "d/M/yyyy", "d-M-yyyy"]
+        for fmt in formats {
+            f.dateFormat = fmt
+            if let d = f.date(from: s) {
+                return d
+            }
+        }
+        
+        // Eğer hiçbiri çalışmazsa bugünün tarihini döndür (fallback)
         return Date()
     }
     

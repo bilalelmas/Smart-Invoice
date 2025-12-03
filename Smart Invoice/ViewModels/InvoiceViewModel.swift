@@ -58,39 +58,63 @@ class InvoiceViewModel: ObservableObject {
         invoice.createdAt = Date()
         
         do {
-            // 1. Önce Firebase'e ekle ve referansı (ref) al
-            let ref = try db.collection("invoices").addDocument(from: invoice)
-            
-            // 2. Firebase'in oluşturduğu ID'yi bizim modele ata
-            invoice.id = ref.documentID
-            
-            // 3. Active Learning: Değişiklik varsa eğitim verisi olarak kaydet
-            if let original = originalOCRInvoice {
-                let diffs = TrainingData.detectDiffs(original: original, final: invoice)
-                if !diffs.isEmpty {
-                    let trainingData = TrainingData(
-                        invoiceId: ref.documentID,
-                        originalOCR: original,
-                        userCorrected: invoice,
-                        diffs: diffs
-                    )
-                    try? db.collection("training_data").addDocument(from: trainingData)
-                    print("🧠 Eğitim verisi kaydedildi. Değişen alanlar: \(diffs)")
+            // Eğer fatura zaten kayıtlıysa (ID varsa), güncelle
+            if let invoiceId = invoice.id {
+                // Mevcut faturayı güncelle
+                try db.collection("invoices").document(invoiceId).setData(from: invoice)
+                
+                // Listede de güncelle
+                if let index = invoices.firstIndex(where: { $0.id == invoiceId }) {
+                    DispatchQueue.main.async {
+                        self.invoices[index] = invoice
+                        self.currentDraftInvoice = nil
+                        self.currentImage = nil
+                        self.originalOCRInvoice = nil
+                        print("✅ Fatura başarıyla güncellendi. ID: \(invoiceId)")
+                    }
                 }
-            }
-            
-            // 4. Artık ID'si olan faturayı listeye ekle
-            DispatchQueue.main.async {
-                self.invoices.insert(invoice, at: 0)
-                self.currentDraftInvoice = nil // Formu kapat
-                self.currentImage = nil // Görseli temizle
-                self.originalOCRInvoice = nil
-                print("✅ Fatura başarıyla kaydedildi. ID: \(ref.documentID)")
+            } else {
+                // Yeni fatura ekle
+                let ref = try db.collection("invoices").addDocument(from: invoice)
+                invoice.id = ref.documentID
+                
+                // 3. Active Learning: Değişiklik varsa eğitim verisi olarak kaydet
+                if let original = originalOCRInvoice {
+                    let diffs = TrainingData.detectDiffs(original: original, final: invoice)
+                    if !diffs.isEmpty {
+                        let trainingData = TrainingData(
+                            invoiceId: ref.documentID,
+                            originalOCR: original,
+                            userCorrected: invoice,
+                            diffs: diffs
+                        )
+                        try? db.collection("training_data").addDocument(from: trainingData)
+                        print("🧠 Eğitim verisi kaydedildi. Değişen alanlar: \(diffs)")
+                    }
+                }
+                
+                // 4. Artık ID'si olan faturayı listeye ekle
+                DispatchQueue.main.async {
+                    self.invoices.insert(invoice, at: 0)
+                    self.currentDraftInvoice = nil // Formu kapat
+                    self.currentImage = nil // Görseli temizle
+                    self.originalOCRInvoice = nil
+                    print("✅ Fatura başarıyla kaydedildi. ID: \(ref.documentID)")
+                }
             }
             
         } catch {
             self.errorMessage = "Kaydetme hatası: \(error.localizedDescription)"
             print("❌ Kayıt hatası: \(error.localizedDescription)")
         }
+    }
+    
+    /// Kaydedilmiş bir faturayı düzenlemek için açar
+    func editInvoice(_ invoice: Invoice) {
+        var editableInvoice = invoice
+        editableInvoice.status = .edited
+        self.currentDraftInvoice = editableInvoice
+        self.originalOCRInvoice = nil // Düzenleme için orijinal OCR yok
+        self.currentImage = nil // Kaydedilmiş faturalarda görsel yok
     }
 }

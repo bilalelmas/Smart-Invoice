@@ -2,9 +2,13 @@ import SwiftUI
 
 struct InvoiceRowView: View {
     let invoice: Invoice
+    var onEdit: (() -> Void)? = nil
     
     var body: some View {
-        HStack(spacing: 16) {
+        Button(action: {
+            onEdit?()
+        }) {
+            HStack(spacing: 16) {
             // Sol Taraf: Kategori İkonu (Yuvarlak Arka Planlı)
             ZStack {
                 Circle()
@@ -45,12 +49,14 @@ struct InvoiceRowView: View {
                     .foregroundColor(statusColor(invoice.status))
                     .cornerRadius(6)
             }
+            }
+            .padding(16)
+            .background(Color.white)
+            .cornerRadius(16)
+            .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 4)
+            .padding(.horizontal, 16) // Kenarlardan boşluk
         }
-        .padding(16)
-        .background(Color.white)
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 4)
-        .padding(.horizontal, 16) // Kenarlardan boşluk
+        .buttonStyle(PlainButtonStyle()) // Tıklanabilir ama stil olmadan
     }
     
     // Duruma göre renk belirleme

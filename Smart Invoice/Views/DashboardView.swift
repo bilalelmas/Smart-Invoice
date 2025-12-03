@@ -48,9 +48,11 @@ struct DashboardView: View {
                             ForEach(sortedKeys, id: \.self) { key in
                                 Section(header: Text(key).font(.subheadline).bold()) {
                                     ForEach(grouped[key] ?? []) { invoice in
-                                        InvoiceRowView(invoice: invoice)
-                                            .listRowSeparator(.hidden)
-                                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                        InvoiceRowView(invoice: invoice) {
+                                            viewModel.editInvoice(invoice)
+                                        }
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                     }
                                     .onDelete(perform: deleteInvoice)
                                 }
