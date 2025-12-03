@@ -63,19 +63,19 @@ class EvaluationService: ObservableObject {
             }
             
             // 3. OCR Çalıştır
-            ocrService.recognizeText(from: image) { invoice in
-                guard let invoice = invoice else {
-                    tempResults.append(EvaluationResult(fileName: record.fileName, score: 0, details: "OCR Başarısız", isSuccess: false))
-                    group.leave()
-                    return
+            ocrService.recognizeText(from: image) { result in
+                switch result {
+                case .success(let invoice):
+                    // 4. Karşılaştır ve Puanla
+                    let score = self.calculateScore(expected: record.expected, actual: invoice)
+                    let isSuccess = score > 80.0
+                    let details = "Beklenen: \(record.expected.totalAmount) TL, Bulunan: \(invoice.totalAmount) TL"
+                    
+                    tempResults.append(EvaluationResult(fileName: record.fileName, score: score, details: details, isSuccess: isSuccess))
+                case .failure(let error):
+                    let errorMessage = error.localizedDescription
+                    tempResults.append(EvaluationResult(fileName: record.fileName, score: 0, details: "OCR Başarısız: \(errorMessage)", isSuccess: false))
                 }
-                
-                // 4. Karşılaştır ve Puanla
-                let score = self.calculateScore(expected: record.expected, actual: invoice)
-                let isSuccess = score > 80.0
-                let details = "Beklenen: \(record.expected.totalAmount) TL, Bulunan: \(invoice.totalAmount) TL"
-                
-                tempResults.append(EvaluationResult(fileName: record.fileName, score: score, details: details, isSuccess: isSuccess))
                 group.leave()
             }
         }

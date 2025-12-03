@@ -7,6 +7,7 @@ struct TextBlock: Identifiable {
     let id = UUID()
     let text: String
     let frame: CGRect // Normalleştirilmiş koordinatlar (0-1 arası)
+    let confidence: Float // OCR confidence değeri (0.0 - 1.0)
     
     // Yardımcı özellikler
     var x: CGFloat { frame.origin.x }
@@ -15,6 +16,21 @@ struct TextBlock: Identifiable {
     var height: CGFloat { frame.height }
     
     var midY: CGFloat { frame.midY }
+    
+    /// Vision Framework koordinat sisteminden (sol alt köşe) UIKit koordinat sistemine (sol üst köşe) dönüştürür.
+    /// Vision: (0,0) sol alt, (1,1) sağ üst
+    /// UIKit: (0,0) sol üst, (1,1) sağ alt
+    /// - Parameter visionRect: Vision Framework'ün normalleştirilmiş boundingBox'ı
+    /// - Returns: UIKit koordinat sistemine dönüştürülmüş CGRect
+    static func convertVisionToUIKit(_ visionRect: CGRect) -> CGRect {
+        // Vision'da Y koordinatı sol alttan başlar, UIKit'de sol üstten başlar
+        // Dönüşüm: y_uiKit = 1 - (y_vision + height_vision)
+        let x = visionRect.origin.x
+        let y = 1 - (visionRect.origin.y + visionRect.height)
+        let width = visionRect.width
+        let height = visionRect.height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
 }
 
 /// Aynı satırda bulunan TextBlock'ların birleşimi.

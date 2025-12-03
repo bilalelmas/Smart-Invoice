@@ -25,16 +25,25 @@ class InvoiceViewModel: ObservableObject {
         self.currentImage = image // Görseli sakla
         
         // OCR Servisini çağır
-        ocrService.recognizeText(from: image) { [weak self] draftInvoice in
+        ocrService.recognizeText(from: image) { [weak self] result in
             DispatchQueue.main.async {
                 self?.isProcessing = false
                 
-                if let invoice = draftInvoice {
+                switch result {
+                case .success(let invoice):
                     // Parser'dan gelen veriyi taslak olarak ata
                     self?.currentDraftInvoice = invoice
                     self?.originalOCRInvoice = invoice // Orijinal hali sakla (Active Learning için)
-                } else {
-                    self?.errorMessage = "Fatura okunamadı. Lütfen tekrar deneyin."
+                    self?.errorMessage = nil
+                case .failure(let error):
+                    // Kullanıcıya anlamlı hata mesajı göster
+                    if let ocrError = error as? OCRServiceError {
+                        self?.errorMessage = ocrError.errorDescription
+                    } else if let parserError = error as? InvoiceParserError {
+                        self?.errorMessage = parserError.errorDescription
+                    } else {
+                        self?.errorMessage = error.localizedDescription
+                    }
                 }
             }
         }

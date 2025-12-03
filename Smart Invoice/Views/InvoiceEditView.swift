@@ -38,16 +38,13 @@ struct InvoiceEditView: View {
                                         .overlay(
                                             GeometryReader { geometry in
                                                 ForEach(invoice.debugRegions) { region in
-                                                    // Vision (Sol-Alt) -> SwiftUI (Sol-Üst) Dönüşümü
-                                                    // Vision'da Y=0 en alttır. SwiftUI'da Y=0 en üsttür.
-                                                    // Rect: x, y, width, height.
-                                                    // Vision Rect: y, kutunun ALT kenarının y konumudur.
+                                                    // Artık koordinatlar UIKit sisteminde (sol üst köşe)
+                                                    // SwiftUI da sol üst köşe kullanır, direkt kullanabiliriz
                                                     
                                                     let w = region.rect.width * geometry.size.width
                                                     let h = region.rect.height * geometry.size.height
                                                     let x = region.rect.origin.x * geometry.size.width
-                                                    // Y dönüşümü: (1 - (y + h))
-                                                    let y = (1 - (region.rect.origin.y + region.rect.height)) * geometry.size.height
+                                                    let y = region.rect.origin.y * geometry.size.height
                                                     
                                                     Rectangle()
                                                         .stroke(colorForRegion(region.type), lineWidth: 2)

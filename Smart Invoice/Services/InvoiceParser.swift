@@ -1,10 +1,28 @@
 import Foundation
 import CoreGraphics
 
+/// InvoiceParser için özel hata tipleri
+enum InvoiceParserError: LocalizedError {
+    case emptyInput
+    case invalidData(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .emptyInput:
+            return "Girdi verisi boş"
+        case .invalidData(let message):
+            return "Geçersiz veri: \(message)"
+        }
+    }
+}
+
 class InvoiceParser {
     
     static let shared = InvoiceParser()
     private init() {}
+    
+    // Thread safety için serial queue
+    private let parseQueue = DispatchQueue(label: "com.smartinvoice.parser", qos: .userInitiated)
     
     private let profiles: [VendorProfile] = [
         TrendyolProfile(),
@@ -14,12 +32,21 @@ class InvoiceParser {
     
     func parse(text: String) -> Invoice {
         // Eski yöntem (String bazlı) - Geriye dönük uyumluluk için
-        return parse(blocks: [], rawText: text)
+        return (try? parse(blocks: [], rawText: text)) ?? Invoice(userId: "")
     }
     
     /// Konumsal Analiz Motoru (Spatial Analysis Engine)
     /// Blokları koordinatlarına göre satırlara ayırır ve işler.
-    func parse(blocks: [TextBlock], rawText: String? = nil) -> Invoice {
+    /// Thread-safe: Serial queue kullanarak eşzamanlı çağrıları sıraya koyar.
+    /// - Throws: InvoiceParserError
+    func parse(blocks: [TextBlock], rawText: String? = nil) throws -> Invoice {
+        // Thread-safe: Parse işlemini serial queue'da çalıştır
+        return try parseQueue.sync {
+        // Boş input kontrolü
+        if blocks.isEmpty && (rawText == nil || rawText?.isEmpty == true) {
+            throw InvoiceParserError.emptyInput
+        }
+        
         var invoice = Invoice(userId: "")
         
         // 1. Satırları Oluştur (Row Clustering)
@@ -71,6 +98,7 @@ class InvoiceParser {
         
         invoice.confidenceScore = calculateRealConfidence(invoice: invoice)
         return invoice
+        }
     }
     
     // MARK: - 🕵️‍♂️ Debug / Görselleştirme
@@ -166,25 +194,25 @@ class InvoiceParser {
     // MARK: - 📍 Konumsal Analiz Metodları
     
     /// Blokları Y koordinatlarına göre gruplayıp satır (TextLine) oluşturur.
+    /// Artık koordinatlar UIKit sisteminde (sol üst köşe), Y değeri yukarıdan aşağıya artar.
     private func groupBlocksIntoLines(_ blocks: [TextBlock]) -> [TextLine] {
         guard !blocks.isEmpty else { return [] }
         
-        // Blokları Y konumuna göre sırala
-        let sortedBlocks = blocks.sorted { $0.y > $1.y } // Vision'da Y aşağıdan yukarı artar mı? Genelde 0 sol üsttür ama Vision'da sol alt olabilir.
-        // Vision: (0,0) sol alt, (1,1) sağ üst. Yani Y arttıkça yukarı çıkar.
-        // Ancak biz TextBlock oluştururken normalleştirilmiş koordinatları nasıl aldığımıza bağlı.
-        // VNRecognizedTextObservation boundingBox (0,0) sol alt köşedir.
-        // Biz bunu okurken Y'yi ters çevirip çevirmediğimize dikkat etmeliyiz.
-        // Şimdilik Vision'ın standart çıktısını varsayalım: Y değeri satırın alt kenarıdır.
-        // Üstteki satırın Y değeri daha BÜYÜK olur.
+        // Blokları Y konumuna göre sırala (yukarıdan aşağıya: küçükten büyüğe)
+        // UIKit koordinat sisteminde Y=0 en üst, Y=1 en alttır
+        let sortedBlocks = blocks.sorted { $0.y < $1.y }
         
         var lines: [TextLine] = []
         var currentLineBlocks: [TextBlock] = []
         
+        // Dinamik tolerans hesapla (blokların ortalama yüksekliğine göre)
+        let avgHeight = blocks.map { $0.height }.reduce(0, +) / CGFloat(blocks.count)
+        let tolerance = max(0.01, avgHeight * 0.3) // Yüksekliğin %30'u veya minimum 0.01
+        
         for block in sortedBlocks {
             if let lastBlock = currentLineBlocks.last {
-                // Y farkı çok azsa aynı satırdadır (Tolerans: %1 - %2)
-                if abs(block.midY - lastBlock.midY) < 0.02 {
+                // Y farkı tolerans içindeyse aynı satırdadır
+                if abs(block.midY - lastBlock.midY) < tolerance {
                     currentLineBlocks.append(block)
                 } else {
                     // Yeni satıra geç
@@ -268,8 +296,8 @@ class InvoiceParser {
             // Kara liste kontrolü
             if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
             
-            // Hedef kelime kontrolü
-            if RegexPatterns.Keywords.totalAmounts.contains(where: { upper.contains($0) }) {
+            // Hedef kelime kontrolü (Ödenecek Tutar)
+            if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
                 // 1. Aynı satırda ara (En sağdaki değer)
                 if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
                     return amount
@@ -311,13 +339,9 @@ class InvoiceParser {
     private func extractSubTotalSpatial(lines: [TextLine]) -> Double {
         for line in lines.reversed() {
             let upper = line.text.uppercased()
-            // "TOPLAM" içerip "GENEL" veya "ÖDENECEK" içermeyen satırlar
-            if upper.contains("TOPLAM") && !upper.contains("GENEL") && !upper.contains("ÖDENECEK") && !upper.contains("KDV") {
+            // Ara Toplam / Matrah Kelimeleri
+            if RegexPatterns.Keywords.subTotalAmounts.contains(where: { upper.contains($0) }) {
                  if let amount = findAmountInString(line.text) { return amount }
-            }
-            // Matrah veya Mal Hizmet
-            if upper.contains("MATRAH") || upper.contains("MAL HIZMET") || upper.contains("MAL HİZMET") {
-                if let amount = findAmountInString(line.text) { return amount }
             }
         }
         return 0.0
@@ -336,7 +360,7 @@ class InvoiceParser {
             if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
             
             // RegexPatterns'den gelen hedef kelimeler
-            if RegexPatterns.Keywords.totalAmounts.contains(where: { upper.contains($0) }) {
+            if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
                 if let amount = findAmountInString(line) {
                     candidates.append(amount)
                 }
@@ -345,7 +369,7 @@ class InvoiceParser {
         
         // "Ödenecek" alt satır kontrolü
         for (index, line) in lines.enumerated().reversed() {
-            if RegexPatterns.Keywords.totalAmounts.contains(where: { line.uppercased().contains($0) }) {
+            if RegexPatterns.Keywords.payableAmounts.contains(where: { line.uppercased().contains($0) }) {
                  if index + 1 < lines.count {
                      if let amount = findAmountInString(lines[index + 1]) {
                          candidates.append(amount)
@@ -536,13 +560,11 @@ class InvoiceParser {
     // --- Helper Functions ---
     
     internal func extractLastMatch(from text: String, pattern: String) -> String? {
-        do {
-            let regex = try NSRegularExpression(pattern: pattern)
-            let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-            if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
-                return String(text[range])
-            }
-        } catch {}
+        guard let regex = RegexPatterns.getRegex(pattern: pattern) else { return nil }
+        let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
+            return String(text[range])
+        }
         return nil
     }
     
@@ -571,22 +593,93 @@ class InvoiceParser {
     }
     
     internal func extractString(from text: String, pattern: String) -> String? {
-        do {
-            let r = try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
-            let res = r.matches(in: text, range: NSRange(text.startIndex..., in: text))
-            if let m = res.first { return String(text[Range(m.range, in: text)!]) }
-        } catch {}
+        guard let regex = RegexPatterns.getRegex(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let res = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        if let m = res.first, let range = Range(m.range, in: text) {
+            return String(text[range])
+        }
         return nil
     }
     
     private func calculateRealConfidence(invoice: Invoice) -> Float {
         var score: Float = 0.0
-        var checks: Float = 0.0
-        checks += 1; if !invoice.merchantName.isEmpty { score += 1 }
-        checks += 1; if !invoice.merchantTaxID.isEmpty { score += 1 }
-        checks += 1; if invoice.totalAmount > 0 { score += 1 }
-        checks += 1; if invoice.ettn.count > 20 { score += 1 }
-        if invoice.totalAmount == 0 { return (score / checks) * 0.5 }
-        return score / checks
+        var totalWeight: Float = 0.0
+        
+        // 1. Temel alanlar kontrolü (Ağırlık: %40)
+        let basicFieldsWeight: Float = 0.4
+        totalWeight += basicFieldsWeight
+        var basicScore: Float = 0.0
+        var basicChecks: Float = 0.0
+        
+        basicChecks += 1
+        if !invoice.merchantName.isEmpty { basicScore += 1 }
+        
+        basicChecks += 1
+        if !invoice.merchantTaxID.isEmpty { basicScore += 1 }
+        
+        basicChecks += 1
+        if invoice.totalAmount > 0 { basicScore += 1 }
+        
+        basicChecks += 1
+        if invoice.ettn.count > 20 { basicScore += 1 }
+        
+        let basicConfidence = basicChecks > 0 ? (basicScore / basicChecks) : 0.0
+        score += basicConfidence * basicFieldsWeight
+        
+        // 2. Finansal veriler kontrolü (Ağırlık: %30)
+        let financialWeight: Float = 0.3
+        totalWeight += financialWeight
+        var financialScore: Float = 0.0
+        
+        if invoice.totalAmount > 0 {
+            financialScore += 1.0
+            // Ara toplam ve KDV tutarlılık kontrolü
+            if invoice.subTotal > 0 && invoice.taxAmount > 0 {
+                let calculatedTotal = invoice.subTotal + invoice.taxAmount
+                let difference = abs(invoice.totalAmount - calculatedTotal)
+                // %1 tolerans içindeyse ekstra puan
+                if difference < invoice.totalAmount * 0.01 {
+                    financialScore += 0.5
+                }
+            }
+        }
+        
+        score += min(financialScore / 1.5, 1.0) * financialWeight
+        
+        // 3. Veri kalitesi kontrolü (Ağırlık: %20)
+        let qualityWeight: Float = 0.2
+        totalWeight += qualityWeight
+        var qualityScore: Float = 0.0
+        
+        // Fatura numarası format kontrolü
+        if !invoice.invoiceNo.isEmpty {
+            qualityScore += 0.5
+            // E-Arşiv formatı kontrolü (3 harf + yıl + 9 rakam)
+            if invoice.invoiceNo.count >= 14 {
+                qualityScore += 0.5
+            }
+        }
+        
+        // Tarih geçerliliği kontrolü
+        let calendar = Calendar.current
+        let now = Date()
+        if calendar.isDate(invoice.invoiceDate, inSameDayAs: now) || invoice.invoiceDate < now {
+            qualityScore += 0.5
+        }
+        
+        score += min(qualityScore / 1.5, 1.0) * qualityWeight
+        
+        // 4. Ürün kalemleri kontrolü (Ağırlık: %10)
+        let itemsWeight: Float = 0.1
+        totalWeight += itemsWeight
+        let itemsScore: Float = invoice.items.isEmpty ? 0.0 : 1.0
+        score += itemsScore * itemsWeight
+        
+        // Toplam tutar 0 ise confidence'ı düşür
+        if invoice.totalAmount == 0 {
+            return score * 0.5
+        }
+        
+        return min(score / totalWeight, 1.0)
     }
 }
