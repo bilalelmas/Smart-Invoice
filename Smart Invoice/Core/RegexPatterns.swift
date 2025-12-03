@@ -58,6 +58,9 @@ struct RegexPatterns {
         /// Tutar Tespiti için Kara Liste (Bunları Toplam sanma!)
         static let amountBlacklist = ["HARIÇ", "HARIC", "MATRAH", "NET", "KDV'SİZ", "KDVSİZ", "MAL HİZMET"]
         
+        /// KDV (Vergi) Tutarını Bulmak İçin Anahtar Kelimeler
+        static let taxAmounts = ["HESAPLANAN KDV", "TOPLAM KDV", "KDV TUTARI", "HESAPLANAN KATMA DEĞER VERGİSİ", "KDV (%18)", "KDV (%20)", "KDV (%10)"]
+        
         /// Tarih Etiketleri
         static let dateTargets = ["FATURA TARİHİ", "DÜZENLEME TARİHİ", "DÜZENLEME ZAMANI"]
         static let dateBlacklist = ["SİPARİŞ", "SIPARIS", "ÖDEME", "VADE", "TESLİMAT"]

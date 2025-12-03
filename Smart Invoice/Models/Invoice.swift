@@ -67,4 +67,21 @@ struct Invoice: Identifiable, Codable {
     init(userId: String = "") {
         self.userId = userId
     }
+    
+    // Debug / Görselleştirme Verileri
+    var debugRegions: [OCRRegion] = []
+}
+
+/// Görsel Hata Ayıklama için Bölge Modeli
+struct OCRRegion: Identifiable, Codable {
+    var id: String = UUID().uuidString
+    var type: RegionType
+    var rect: CGRect // Normalleştirilmiş (0-1)
+    
+    enum RegionType: String, Codable {
+        case seller = "Satıcı Bloğu" // Kırmızı
+        case total = "Toplam Tutar"  // Yeşil
+        case table = "Tablo Alanı"   // Mavi
+        case date = "Tarih"          // Sarı
+    }
 }

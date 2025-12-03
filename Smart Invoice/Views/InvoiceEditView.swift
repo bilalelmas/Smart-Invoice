@@ -4,6 +4,7 @@ struct InvoiceEditView: View {
     @Binding var invoice: Invoice
     var onSave: () -> Void
     var onCancel: () -> Void
+    var image: UIImage? // Debug için görsel
     
     // Para birimi formatlayıcı
     private let currencyFormatter: NumberFormatter = {
@@ -21,6 +22,58 @@ struct InvoiceEditView: View {
                 
                 ScrollView {
                     VStack(spacing: 24) {
+                        // 0. Görsel Hata Ayıklayıcı (Visual Debugger)
+                        if let image = image, !invoice.debugRegions.isEmpty {
+                            VStack(alignment: .leading) {
+                                Text("Görsel Analiz")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                                    .padding(.leading)
+                                
+                                ZStack {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .cornerRadius(12)
+                                        .overlay(
+                                            GeometryReader { geometry in
+                                                ForEach(invoice.debugRegions) { region in
+                                                    // Vision (Sol-Alt) -> SwiftUI (Sol-Üst) Dönüşümü
+                                                    // Vision'da Y=0 en alttır. SwiftUI'da Y=0 en üsttür.
+                                                    // Rect: x, y, width, height.
+                                                    // Vision Rect: y, kutunun ALT kenarının y konumudur.
+                                                    
+                                                    let w = region.rect.width * geometry.size.width
+                                                    let h = region.rect.height * geometry.size.height
+                                                    let x = region.rect.origin.x * geometry.size.width
+                                                    // Y dönüşümü: (1 - (y + h))
+                                                    let y = (1 - (region.rect.origin.y + region.rect.height)) * geometry.size.height
+                                                    
+                                                    Rectangle()
+                                                        .stroke(colorForRegion(region.type), lineWidth: 2)
+                                                        .background(colorForRegion(region.type).opacity(0.2))
+                                                        .frame(width: w, height: h)
+                                                        .position(x: x + w/2, y: y + h/2)
+                                                }
+                                            }
+                                        )
+                                }
+                                .frame(height: 300)
+                                .padding(.horizontal)
+                                
+                                // Lejant
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack {
+                                        legendItem(color: .red, text: "Satıcı")
+                                        legendItem(color: .green, text: "Tutar")
+                                        legendItem(color: .blue, text: "Tablo")
+                                        legendItem(color: .yellow, text: "Tarih")
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            }
+                        }
+                        
                         // 1. Güven Skoru Kartı
                         confidenceCard
                         
@@ -156,6 +209,33 @@ struct InvoiceEditView: View {
         .cornerRadius(16)
         .shadow(radius: 5)
     }
+}
+
+// MARK: - Helper Functions
+
+func colorForRegion(_ type: OCRRegion.RegionType) -> Color {
+    switch type {
+    case .seller: return .red
+    case .total: return .green
+    case .table: return .blue
+    case .date: return .yellow
+    }
+}
+
+func legendItem(color: Color, text: String) -> some View {
+    HStack(spacing: 4) {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+        Text(text)
+            .font(.caption)
+            .foregroundColor(.gray)
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .background(Color.white)
+    .cornerRadius(8)
+    .shadow(radius: 1)
 }
 
 // MARK: - Helper Components

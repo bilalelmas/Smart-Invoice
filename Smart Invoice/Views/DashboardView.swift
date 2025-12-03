@@ -91,7 +91,9 @@ struct DashboardView: View {
                 },
                 onCancel: {
                     viewModel.currentDraftInvoice = nil
-                }
+                    viewModel.currentImage = nil
+                },
+                image: viewModel.currentImage
             )
         }
     }

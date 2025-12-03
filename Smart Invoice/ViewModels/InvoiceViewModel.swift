@@ -9,6 +9,7 @@ class InvoiceViewModel: ObservableObject {
     
     @Published var invoices: [Invoice] = [] // Kayıtlı faturalar
     @Published var currentDraftInvoice: Invoice? // Şu an düzenlenen fatura
+    @Published var currentImage: UIImage? // OCR yapılan görsel (Debug için)
     @Published var isProcessing: Bool = false // Yükleniyor animasyonu için
     @Published var errorMessage: String?
     
@@ -20,6 +21,7 @@ class InvoiceViewModel: ObservableObject {
     func scanInvoice(image: UIImage) {
         self.isProcessing = true
         self.errorMessage = nil
+        self.currentImage = image // Görseli sakla
         
         // OCR Servisini çağır
         ocrService.recognizeText(from: image) { [weak self] draftInvoice in
@@ -56,6 +58,7 @@ class InvoiceViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self.invoices.insert(invoice, at: 0)
                 self.currentDraftInvoice = nil // Formu kapat
+                self.currentImage = nil // Görseli temizle
                 print("✅ Fatura başarıyla kaydedildi. ID: \(ref.documentID)")
             }
             

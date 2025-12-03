@@ -36,16 +36,30 @@ class OCRService: ObservableObject {
                 return
             }
             
-            // Okunan metinleri birleştir (Debug ve basit regex için)
-            let extractedText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+            // Okunan metinleri bloklara dönüştür
+            let blocks: [TextBlock] = observations.compactMap { observation in
+                guard let candidate = observation.topCandidates(1).first else { return nil }
+                
+                // Vision koordinat sistemi (0,0 sol alt) -> UIKit (0,0 sol üst) dönüşümü gerekebilir.
+                // Ancak TextBlock içinde sadece bağıl konum tutuyoruz, sıralama için Y'yi olduğu gibi kullanabiliriz.
+                // Vision'da Y yukarı doğru artar. Bizim Row Clustering "Y > Y" diyerek sıralıyor, yani yukarıdan aşağıya (büyükten küçüğe)
+                // Bu yüzden boundingBox'ı direkt kullanabiliriz.
+                
+                return TextBlock(
+                    text: candidate.string,
+                    frame: observation.boundingBox // Normalleştirilmiş (0-1 arası)
+                )
+            }
+            
+            // Debug için ham metni de oluştur
+            let extractedText = blocks.map { $0.text }.joined(separator: "\n")
             
             DispatchQueue.main.async {
                 self.recognizedText = extractedText
                 self.isProcessing = false
                 
-                // Ham metni anlamlandır ve Invoice objesine çevir
-                // Artık tüm mantık InvoiceParser içinde (Hybrid: Regex + Strategy)
-                let draftInvoice = InvoiceParser.shared.parse(text: extractedText)
+                // Konumsal Analiz ile Parse Et
+                let draftInvoice = InvoiceParser.shared.parse(blocks: blocks, rawText: extractedText)
                 completion(draftInvoice)
             }
         }
