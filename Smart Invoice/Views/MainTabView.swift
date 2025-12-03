@@ -33,9 +33,7 @@ struct MainTabView: View {
                 case .analytics:
                     AnalyticsView(viewModel: viewModel)
                 case .profile:
-                    Text("Profil Ekranı (Yakında)")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(hex: "F2F2F7"))
+                    ProfileView(viewModel: viewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
