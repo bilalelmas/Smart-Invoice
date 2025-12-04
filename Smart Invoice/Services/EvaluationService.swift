@@ -34,7 +34,8 @@ class EvaluationService: ObservableObject {
     }
     
     /// Testi Başlat
-    func runEvaluation() {
+    @MainActor
+    func runEvaluation() async {
         self.isRunning = true
         self.results = []
         
@@ -47,44 +48,50 @@ class EvaluationService: ObservableObject {
             return
         }
         
-        let group = DispatchGroup()
         var tempResults: [EvaluationResult] = []
         
-        for record in records {
-            group.enter()
-            
-            // 2. Görseli Yükle (Assets veya Bundle'dan)
-            // Not: Gerçek test için bu isimde görsellerin projeye eklenmesi gerekir.
-            guard let image = UIImage(named: record.fileName) else {
-                print("⚠️ Görsel bulunamadı: \(record.fileName)")
-                tempResults.append(EvaluationResult(fileName: record.fileName, score: 0, details: "Görsel Bulunamadı", isSuccess: false))
-                group.leave()
-                continue
+        // 2. Tüm kayıtları async olarak işle
+        await withTaskGroup(of: EvaluationResult?.self) { group in
+            for record in records {
+                group.addTask {
+                    // 2. Görseli Yükle (Assets veya Bundle'dan)
+                    // Not: Gerçek test için bu isimde görsellerin projeye eklenmesi gerekir.
+                    guard let image = UIImage(named: record.fileName) else {
+                        print("⚠️ Görsel bulunamadı: \(record.fileName)")
+                        return EvaluationResult(fileName: record.fileName, score: 0, details: "Görsel Bulunamadı", isSuccess: false)
+                    }
+                    
+                    // 3. OCR Çalıştır
+                    do {
+                        let invoice = try await self.ocrService.recognizeText(from: image)
+                        
+                        // 4. Karşılaştır ve Puanla (MainActor'den çağır)
+                        let score = await MainActor.run {
+                            self.calculateScore(expected: record.expected, actual: invoice)
+                        }
+                        let isSuccess = score > 80.0
+                        let details = "Beklenen: \(record.expected.totalAmount) TL, Bulunan: \(invoice.totalAmount) TL"
+                        
+                        return EvaluationResult(fileName: record.fileName, score: score, details: details, isSuccess: isSuccess)
+                    } catch {
+                        let errorMessage = error.localizedDescription
+                        return EvaluationResult(fileName: record.fileName, score: 0, details: "OCR Başarısız: \(errorMessage)", isSuccess: false)
+                    }
+                }
             }
             
-            // 3. OCR Çalıştır
-            ocrService.recognizeText(from: image) { result in
-                switch result {
-                case .success(let invoice):
-                    // 4. Karşılaştır ve Puanla
-                    let score = self.calculateScore(expected: record.expected, actual: invoice)
-                    let isSuccess = score > 80.0
-                    let details = "Beklenen: \(record.expected.totalAmount) TL, Bulunan: \(invoice.totalAmount) TL"
-                    
-                    tempResults.append(EvaluationResult(fileName: record.fileName, score: score, details: details, isSuccess: isSuccess))
-                case .failure(let error):
-                    let errorMessage = error.localizedDescription
-                    tempResults.append(EvaluationResult(fileName: record.fileName, score: 0, details: "OCR Başarısız: \(errorMessage)", isSuccess: false))
+            // Sonuçları topla
+            for await result in group {
+                if let result = result {
+                    tempResults.append(result)
                 }
-                group.leave()
             }
         }
         
-        group.notify(queue: .main) {
-            self.results = tempResults
-            self.overallScore = tempResults.isEmpty ? 0 : tempResults.reduce(0) { $0 + $1.score } / Double(tempResults.count)
-            self.isRunning = false
-        }
+        // 5. Sonuçları güncelle
+        self.results = tempResults
+        self.overallScore = tempResults.isEmpty ? 0 : tempResults.reduce(0) { $0 + $1.score } / Double(tempResults.count)
+        self.isRunning = false
     }
     
     private func calculateScore(expected: ExpectedData, actual: Invoice) -> Double {

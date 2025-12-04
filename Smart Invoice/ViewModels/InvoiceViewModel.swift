@@ -14,43 +14,58 @@ class InvoiceViewModel: ObservableObject {
     @Published var isProcessing: Bool = false // Yükleniyor animasyonu için
     @Published var errorMessage: String?
     
-    // Servisler
-    private let ocrService = OCRService()
-    private let db = Firestore.firestore()
+    // Servisler (Dependency Injection)
+    private let ocrService: OCRServiceProtocol
+    private let invoiceParser: InvoiceParserProtocol
+    private let repository: FirebaseInvoiceRepositoryProtocol
+    
+    // Constructor Injection
+    init(
+        ocrService: OCRServiceProtocol = OCRService(),
+        invoiceParser: InvoiceParserProtocol = InvoiceParser.shared,
+        repository: FirebaseInvoiceRepositoryProtocol = FirebaseInvoiceRepository()
+    ) {
+        self.ocrService = ocrService
+        self.invoiceParser = invoiceParser
+        self.repository = repository
+    }
     
     /// Görüntüden fatura okuma sürecini başlatır
-    func scanInvoice(image: UIImage) {
+    @MainActor
+    func scanInvoice(image: UIImage) async {
         self.isProcessing = true
         self.errorMessage = nil
         self.currentImage = image // Görseli sakla
         
-        // OCR Servisini çağır
-        ocrService.recognizeText(from: image) { [weak self] result in
-            DispatchQueue.main.async {
-                self?.isProcessing = false
-                
-                switch result {
-                case .success(let invoice):
-                    // Parser'dan gelen veriyi taslak olarak ata
-                    self?.currentDraftInvoice = invoice
-                    self?.originalOCRInvoice = invoice // Orijinal hali sakla (Active Learning için)
-                    self?.errorMessage = nil
-                case .failure(let error):
-                    // Kullanıcıya anlamlı hata mesajı göster
-                    if let ocrError = error as? OCRServiceError {
-                        self?.errorMessage = ocrError.errorDescription
-                    } else if let parserError = error as? InvoiceParserError {
-                        self?.errorMessage = parserError.errorDescription
-                    } else {
-                        self?.errorMessage = error.localizedDescription
-                    }
-                }
+        do {
+            // OCR Servisini çağır
+            let invoice = try await ocrService.recognizeText(from: image)
+            
+            // Parser'dan gelen veriyi taslak olarak ata
+            // Sheet çakışmasını önlemek için kısa bir gecikme ekle
+            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 saniye
+            
+            self.currentDraftInvoice = invoice
+            self.originalOCRInvoice = invoice // Orijinal hali sakla (Active Learning için)
+            self.errorMessage = nil
+            self.isProcessing = false
+        } catch {
+            self.isProcessing = false
+            
+            // Kullanıcıya anlamlı hata mesajı göster
+            if let ocrError = error as? OCRServiceError {
+                self.errorMessage = ocrError.errorDescription
+            } else if let parserError = error as? InvoiceParserError {
+                self.errorMessage = parserError.errorDescription
+            } else {
+                self.errorMessage = error.localizedDescription
             }
         }
     }
     
     /// Düzenlenmiş faturayı Firebase'e kaydeder
-    func saveInvoice() {
+    @MainActor
+    func saveInvoice() async {
         guard var invoice = currentDraftInvoice else { return }
         
         // Durumu güncelle
@@ -61,46 +76,42 @@ class InvoiceViewModel: ObservableObject {
             // Eğer fatura zaten kayıtlıysa (ID varsa), güncelle
             if let invoiceId = invoice.id {
                 // Mevcut faturayı güncelle
-                try db.collection("invoices").document(invoiceId).setData(from: invoice)
+                try await repository.updateInvoice(invoice)
                 
                 // Listede de güncelle
                 if let index = invoices.firstIndex(where: { $0.id == invoiceId }) {
-                    DispatchQueue.main.async {
-                        self.invoices[index] = invoice
-                        self.currentDraftInvoice = nil
-                        self.currentImage = nil
-                        self.originalOCRInvoice = nil
-                        print("✅ Fatura başarıyla güncellendi. ID: \(invoiceId)")
-                    }
+                    self.invoices[index] = invoice
+                    self.currentDraftInvoice = nil
+                    self.currentImage = nil
+                    self.originalOCRInvoice = nil
+                    print("✅ Fatura başarıyla güncellendi. ID: \(invoiceId)")
                 }
             } else {
                 // Yeni fatura ekle
-                let ref = try db.collection("invoices").addDocument(from: invoice)
-                invoice.id = ref.documentID
+                let invoiceId = try await repository.addInvoice(invoice)
+                invoice.id = invoiceId
                 
                 // 3. Active Learning: Değişiklik varsa eğitim verisi olarak kaydet
                 if let original = originalOCRInvoice {
                     let diffs = TrainingData.detectDiffs(original: original, final: invoice)
                     if !diffs.isEmpty {
                         let trainingData = TrainingData(
-                            invoiceId: ref.documentID,
+                            invoiceId: invoiceId,
                             originalOCR: original,
                             userCorrected: invoice,
                             diffs: diffs
                         )
-                        try? db.collection("training_data").addDocument(from: trainingData)
+                        try? await repository.addTrainingData(trainingData)
                         print("🧠 Eğitim verisi kaydedildi. Değişen alanlar: \(diffs)")
                     }
                 }
                 
                 // 4. Artık ID'si olan faturayı listeye ekle
-                DispatchQueue.main.async {
-                    self.invoices.insert(invoice, at: 0)
-                    self.currentDraftInvoice = nil // Formu kapat
-                    self.currentImage = nil // Görseli temizle
-                    self.originalOCRInvoice = nil
-                    print("✅ Fatura başarıyla kaydedildi. ID: \(ref.documentID)")
-                }
+                self.invoices.insert(invoice, at: 0)
+                self.currentDraftInvoice = nil // Formu kapat
+                self.currentImage = nil // Görseli temizle
+                self.originalOCRInvoice = nil
+                print("✅ Fatura başarıyla kaydedildi. ID: \(invoiceId)")
             }
             
         } catch {

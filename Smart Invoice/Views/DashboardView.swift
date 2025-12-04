@@ -4,6 +4,10 @@ import UniformTypeIdentifiers
 struct DashboardView: View {
     @StateObject var viewModel = InvoiceViewModel()
     
+    // Pagination
+    @State private var displayedCount = 20 // İlk 20 fatura
+    private let pageSize = 20
+    
     // UI Durumları
     var body: some View {
         ZStack {
@@ -45,14 +49,21 @@ struct DashboardView: View {
                                 return true 
                             }
                             
-                            ForEach(sortedKeys, id: \.self) { key in
+                            ForEach(sortedKeys.prefix(displayedCount / pageSize + 1), id: \.self) { key in
                                 Section(header: Text(key).font(.subheadline).bold()) {
-                                    ForEach(grouped[key] ?? []) { invoice in
+                                    ForEach(Array((grouped[key] ?? []).prefix(displayedCount)), id: \.id) { invoice in
                                         InvoiceRowView(invoice: invoice) {
                                             viewModel.editInvoice(invoice)
                                         }
                                         .listRowSeparator(.hidden)
                                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                        .onAppear {
+                                            // Son öğeye yaklaşıldığında daha fazla yükle
+                                            if let index = viewModel.invoices.firstIndex(where: { $0.id == invoice.id }),
+                                               index >= displayedCount - 5 {
+                                                loadMore()
+                                            }
+                                        }
                                     }
                                     .onDelete(perform: deleteInvoice)
                                 }
@@ -89,7 +100,9 @@ struct DashboardView: View {
                     }
                 ),
                 onSave: {
-                    viewModel.saveInvoice()
+                    Task { @MainActor in
+                        await viewModel.saveInvoice()
+                    }
                 },
                 onCancel: {
                     viewModel.currentDraftInvoice = nil
@@ -257,6 +270,13 @@ struct DashboardView: View {
     // MARK: - Fonksiyonlar
     
     func deleteInvoice(at offsets: IndexSet) {
+    }
+    
+    func loadMore() {
+        let totalCount = viewModel.invoices.count
+        if displayedCount < totalCount {
+            displayedCount = min(displayedCount + pageSize, totalCount)
+        }
     }
 }
 

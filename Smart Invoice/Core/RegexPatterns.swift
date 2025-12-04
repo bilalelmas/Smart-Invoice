@@ -9,19 +9,59 @@ struct RegexPatterns {
     private static var regexCache: [String: NSRegularExpression] = [:]
     private static let cacheQueue = DispatchQueue(label: "com.smartinvoice.regexcache", attributes: .concurrent)
     
+    // Cache yönetimi
+    private static let maxCacheSize = 100 // Maximum cache size
+    private static var cacheAccessOrder: [String] = [] // LRU için
+    
     /// Pattern'i cache'den al veya oluştur ve cache'le
     static func getRegex(pattern: String, options: NSRegularExpression.Options = .caseInsensitive) -> NSRegularExpression? {
+        let cacheKey = "\(pattern)_\(options.rawValue)"
+        
         return cacheQueue.sync {
-            if let cached = regexCache[pattern] {
+            // Cache'de var mı kontrol et
+            if let cached = regexCache[cacheKey] {
+                // LRU: En son kullanılanı listenin sonuna taşı
+                if let index = cacheAccessOrder.firstIndex(of: cacheKey) {
+                    cacheAccessOrder.remove(at: index)
+                }
+                cacheAccessOrder.append(cacheKey)
                 return cached
             }
             
-            if let regex = try? NSRegularExpression(pattern: pattern, options: options) {
-                regexCache[pattern] = regex
-                return regex
+            // Yeni regex oluştur
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+                return nil
             }
             
-            return nil
+            // Cache size kontrolü
+            if regexCache.count >= maxCacheSize {
+                // LRU: En eski kullanılmayanı sil
+                if let oldestKey = cacheAccessOrder.first {
+                    regexCache.removeValue(forKey: oldestKey)
+                    cacheAccessOrder.removeFirst()
+                }
+            }
+            
+            // Cache'e ekle
+            regexCache[cacheKey] = regex
+            cacheAccessOrder.append(cacheKey)
+            
+            return regex
+        }
+    }
+    
+    /// Cache'i temizle (memory management için)
+    static func clearCache() {
+        cacheQueue.sync {
+            regexCache.removeAll()
+            cacheAccessOrder.removeAll()
+        }
+    }
+    
+    /// Cache istatistikleri (debug için)
+    static func cacheStats() -> (size: Int, maxSize: Int) {
+        return cacheQueue.sync {
+            (regexCache.count, maxCacheSize)
         }
     }
     

@@ -40,7 +40,11 @@ struct EvaluationView: View {
                         }
                     }
                     
-                    Button(action: { service.runEvaluation() }) {
+                    Button(action: {
+                        Task { @MainActor in
+                            await service.runEvaluation()
+                        }
+                    }) {
                         Text("Testi Başlat")
                             .font(.headline)
                             .foregroundColor(.white)

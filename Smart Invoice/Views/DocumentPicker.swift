@@ -29,10 +29,16 @@ struct DocumentPicker: UIViewControllerRepresentable {
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            guard let selectedURL = urls.first else { return }
+            guard let selectedURL = urls.first else {
+                print("❌ DocumentPicker: Hiç dosya seçilmedi")
+                return
+            }
+            
+            print("📄 DocumentPicker: Dosya seçildi: \(selectedURL.lastPathComponent)")
             
             // 1. Güvenli erişimi başlat
             let canAccess = selectedURL.startAccessingSecurityScopedResource()
+            print("🔐 Security scoped resource erişimi: \(canAccess)")
             
             defer {
                 if canAccess {
@@ -44,7 +50,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
             // Bu adım "Permission Denied" hatasını çözer.
             do {
                 let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(selectedURL.lastPathComponent)
+                    .appendingPathComponent(UUID().uuidString + "_" + selectedURL.lastPathComponent)
                 
                 // Eğer eski dosya varsa sil
                 if FileManager.default.fileExists(atPath: tempURL.path) {
@@ -53,12 +59,15 @@ struct DocumentPicker: UIViewControllerRepresentable {
                 
                 // Dosyayı kopyala
                 try FileManager.default.copyItem(at: selectedURL, to: tempURL)
+                print("✅ Dosya kopyalandı: \(tempURL.path)")
                 
                 // 3. Artık güvenli olan yerel URL'i geri döndür
                 parent.onSelect(tempURL)
                 
             } catch {
                 print("❌ Dosya kopyalama hatası: \(error.localizedDescription)")
+                print("   Kaynak: \(selectedURL.path)")
+                print("   Hata detayı: \(error)")
             }
         }
     }

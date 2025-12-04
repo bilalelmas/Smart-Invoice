@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selectedTab: Tab = .home
-    @StateObject private var viewModel = InvoiceViewModel()
+    @StateObject private var viewModel = DIContainer.shared.makeInvoiceViewModel()
     @State private var isTabBarHidden = false
     
     // Global State
@@ -11,6 +11,7 @@ struct MainTabView: View {
     @State private var showImagePicker = false
     @State private var showFilePicker = false
     @State private var selectedImage: UIImage?
+    @State private var showErrorAlert = false
     
     enum Tab: String {
         case home, scan, analytics, profile, test
@@ -26,8 +27,7 @@ struct MainTabView: View {
                 case .scan:
                     Color.clear
                 case .analytics:
-                    // İleride grafikler eklenebilir, şimdilik boş
-                    Text("Analiz Grafikleri (Geliştiriliyor)")
+                    AnalyticsView(viewModel: viewModel)
                 case .profile:
                     Text("Profil (Geliştiriliyor)")
                 case .test:
@@ -54,6 +54,17 @@ struct MainTabView: View {
                     .padding(.bottom, 20)
             }
         }
+        .alert("Hata", isPresented: $showErrorAlert) {
+            Button("Tamam") {
+                viewModel.errorMessage = nil
+                showErrorAlert = false
+            }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .onChange(of: viewModel.errorMessage) {
+            showErrorAlert = viewModel.errorMessage != nil
+        }
         .ignoresSafeArea(.keyboard)
         
         // --- Action Sheets & Modals ---
@@ -66,9 +77,10 @@ struct MainTabView: View {
         .sheet(isPresented: $showScanner) {
             ScannerView(didFinishScanning: { result in
                 showScanner = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
                     if case .success(let images) = result, let img = images.first {
-                        viewModel.scanInvoice(image: img)
+                        await viewModel.scanInvoice(image: img)
                     }
                 }
             }, didCancelScanning: { showScanner = false })
@@ -78,21 +90,68 @@ struct MainTabView: View {
             ImagePicker(selectedImage: $selectedImage, isPresented: $showImagePicker)
                 .onDisappear {
                     if let img = selectedImage {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            viewModel.scanInvoice(image: img)
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
+                            await viewModel.scanInvoice(image: img)
                             selectedImage = nil
                         }
                     }
                 }
         }
-        .sheet(isPresented: $showFilePicker) {
+        .sheet(isPresented: $showFilePicker, onDismiss: {
+            // Sheet kapandıktan sonra işlem yapılacak
+        }) {
             DocumentPicker { localUrl in
+                // Sheet'i kapat
                 showFilePicker = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if localUrl.pathExtension.lowercased() == "pdf", let pdfImg = PDFHelper.pdfToImage(url: localUrl) {
-                        viewModel.scanInvoice(image: pdfImg)
-                    } else if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
-                        viewModel.scanInvoice(image: img)
+                
+                // Dosya işleme işlemini sheet kapandıktan sonra yap
+                Task { @MainActor in
+                    // Sheet'in tamamen kapanması için bekle
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
+                    
+                    do {
+                        // PDF dosyası kontrolü
+                        if localUrl.pathExtension.lowercased() == "pdf" {
+                            print("📄 PDF seçildi: \(localUrl.lastPathComponent)")
+                            
+                            // Security scoped resource erişimi
+                            let canAccess = localUrl.startAccessingSecurityScopedResource()
+                            defer {
+                                if canAccess {
+                                    localUrl.stopAccessingSecurityScopedResource()
+                                }
+                            }
+                            
+                            if let pdfImg = PDFHelper.pdfToImage(url: localUrl) {
+                                print("✅ PDF görüntüye dönüştürüldü, boyut: \(pdfImg.size)")
+                                await viewModel.scanInvoice(image: pdfImg)
+                            } else {
+                                print("❌ PDF görüntüye dönüştürülemedi")
+                                viewModel.errorMessage = "PDF dosyası işlenemedi. Lütfen geçerli bir PDF dosyası seçin."
+                            }
+                        } else {
+                            // Resim dosyası kontrolü
+                            print("🖼️ Resim dosyası seçildi: \(localUrl.lastPathComponent)")
+                            
+                            let canAccess = localUrl.startAccessingSecurityScopedResource()
+                            defer {
+                                if canAccess {
+                                    localUrl.stopAccessingSecurityScopedResource()
+                                }
+                            }
+                            
+                            if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
+                                print("✅ Resim yüklendi, boyut: \(img.size)")
+                                await viewModel.scanInvoice(image: img)
+                            } else {
+                                print("❌ Resim yüklenemedi")
+                                viewModel.errorMessage = "Resim dosyası yüklenemedi. Lütfen geçerli bir resim dosyası seçin."
+                            }
+                        }
+                    } catch {
+                        print("❌ Dosya işleme hatası: \(error.localizedDescription)")
+                        viewModel.errorMessage = "Dosya işlenirken bir hata oluştu: \(error.localizedDescription)"
                     }
                 }
             }
@@ -103,7 +162,11 @@ struct MainTabView: View {
                     get: { viewModel.currentDraftInvoice ?? Invoice(userId: "") },
                     set: { viewModel.currentDraftInvoice = $0 }
                 ),
-                onSave: { viewModel.saveInvoice() },
+                onSave: {
+                    Task { @MainActor in
+                        await viewModel.saveInvoice()
+                    }
+                },
                 onCancel: { viewModel.currentDraftInvoice = nil; viewModel.currentImage = nil },
                 image: viewModel.currentImage
             )

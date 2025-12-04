@@ -122,7 +122,7 @@ struct ProfileView: View {
             .onAppear {
                 generateReports()
             }
-            .onChange(of: viewModel.invoices.count) { _ in
+            .onChange(of: viewModel.invoices.count) {
                 generateReports()
             }
         }

@@ -166,8 +166,8 @@ struct InvoiceEditView: View {
                                     .multilineTextAlignment(.trailing)
                                     .font(.title3.bold())
                                     .foregroundColor(.blue)
-                                    .onChange(of: totalAmountText) { newValue in
-                                        invoice.totalAmount = parseAmount(newValue)
+                                    .onChange(of: totalAmountText) {
+                                        invoice.totalAmount = parseAmount(totalAmountText)
                                     }
                             }
                             
@@ -180,8 +180,8 @@ struct InvoiceEditView: View {
                                 TextField("0,00", text: $subTotalText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
-                                    .onChange(of: subTotalText) { newValue in
-                                        invoice.subTotal = parseAmount(newValue)
+                                    .onChange(of: subTotalText) {
+                                        invoice.subTotal = parseAmount(subTotalText)
                                     }
                             }
                             
@@ -194,8 +194,8 @@ struct InvoiceEditView: View {
                                 TextField("0,00", text: $taxAmountText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
-                                    .onChange(of: taxAmountText) { newValue in
-                                        invoice.taxAmount = parseAmount(newValue)
+                                    .onChange(of: taxAmountText) {
+                                        invoice.taxAmount = parseAmount(taxAmountText)
                                     }
                             }
                         }
@@ -238,7 +238,7 @@ struct InvoiceEditView: View {
             .onAppear {
                 initializeAmountTexts()
             }
-            .onChange(of: invoice.totalAmount) { _ in
+            .onChange(of: invoice.totalAmount) {
                 // Invoice değerleri değiştiğinde (dışarıdan güncelleme) state'leri güncelle
                 if !isInitialized {
                     initializeAmountTexts()

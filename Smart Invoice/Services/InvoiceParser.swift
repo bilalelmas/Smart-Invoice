@@ -16,7 +16,7 @@ enum InvoiceParserError: LocalizedError {
     }
 }
 
-class InvoiceParser {
+class InvoiceParser: InvoiceParserProtocol {
     
     static let shared = InvoiceParser()
     private init() {}
@@ -30,22 +30,25 @@ class InvoiceParser {
         FLOProfile()
     ]
     
-    func parse(text: String) -> Invoice {
+    func parse(text: String) async -> Invoice {
         // Eski yöntem (String bazlı) - Geriye dönük uyumluluk için
-        return (try? parse(blocks: [], rawText: text)) ?? Invoice(userId: "")
+        return (try? await parse(blocks: [], rawText: text)) ?? Invoice(userId: "")
     }
     
     /// Konumsal Analiz Motoru (Spatial Analysis Engine)
     /// Blokları koordinatlarına göre satırlara ayırır ve işler.
     /// Thread-safe: Serial queue kullanarak eşzamanlı çağrıları sıraya koyar.
     /// - Throws: InvoiceParserError
-    func parse(blocks: [TextBlock], rawText: String? = nil) throws -> Invoice {
+    func parse(blocks: [TextBlock], rawText: String? = nil) async throws -> Invoice {
         // Thread-safe: Parse işlemini serial queue'da çalıştır
         return try parseQueue.sync {
         // Boş input kontrolü
         if blocks.isEmpty && (rawText == nil || rawText?.isEmpty == true) {
+            print("❌ InvoiceParser: Boş input - blocks: \(blocks.count), rawText: \(rawText?.count ?? 0) karakter")
             throw InvoiceParserError.emptyInput
         }
+        
+        print("✅ InvoiceParser: Parse başlıyor - blocks: \(blocks.count), rawText: \(rawText?.count ?? 0) karakter")
         
         var invoice = Invoice(userId: "")
         
