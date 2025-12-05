@@ -110,48 +110,43 @@ struct MainTabView: View {
                     // Sheet'in tamamen kapanması için bekle
                     try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
                     
-                    do {
-                        // PDF dosyası kontrolü
-                        if localUrl.pathExtension.lowercased() == "pdf" {
-                            print("📄 PDF seçildi: \(localUrl.lastPathComponent)")
-                            
-                            // Security scoped resource erişimi
-                            let canAccess = localUrl.startAccessingSecurityScopedResource()
-                            defer {
-                                if canAccess {
-                                    localUrl.stopAccessingSecurityScopedResource()
-                                }
-                            }
-                            
-                            if let pdfImg = PDFHelper.pdfToImage(url: localUrl) {
-                                print("✅ PDF görüntüye dönüştürüldü, boyut: \(pdfImg.size)")
-                                await viewModel.scanInvoice(image: pdfImg)
-                            } else {
-                                print("❌ PDF görüntüye dönüştürülemedi")
-                                viewModel.errorMessage = "PDF dosyası işlenemedi. Lütfen geçerli bir PDF dosyası seçin."
-                            }
-                        } else {
-                            // Resim dosyası kontrolü
-                            print("🖼️ Resim dosyası seçildi: \(localUrl.lastPathComponent)")
-                            
-                            let canAccess = localUrl.startAccessingSecurityScopedResource()
-                            defer {
-                                if canAccess {
-                                    localUrl.stopAccessingSecurityScopedResource()
-                                }
-                            }
-                            
-                            if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
-                                print("✅ Resim yüklendi, boyut: \(img.size)")
-                                await viewModel.scanInvoice(image: img)
-                            } else {
-                                print("❌ Resim yüklenemedi")
-                                viewModel.errorMessage = "Resim dosyası yüklenemedi. Lütfen geçerli bir resim dosyası seçin."
+                    // PDF dosyası kontrolü
+                    if localUrl.pathExtension.lowercased() == "pdf" {
+                        print("📄 PDF seçildi: \(localUrl.lastPathComponent)")
+                        
+                        // Security scoped resource erişimi
+                        let canAccess = localUrl.startAccessingSecurityScopedResource()
+                        defer {
+                            if canAccess {
+                                localUrl.stopAccessingSecurityScopedResource()
                             }
                         }
-                    } catch {
-                        print("❌ Dosya işleme hatası: \(error.localizedDescription)")
-                        viewModel.errorMessage = "Dosya işlenirken bir hata oluştu: \(error.localizedDescription)"
+                        
+                        if let pdfImg = PDFHelper.pdfToImage(url: localUrl) {
+                            print("✅ PDF görüntüye dönüştürüldü, boyut: \(pdfImg.size)")
+                            await viewModel.scanInvoice(image: pdfImg)
+                        } else {
+                            print("❌ PDF görüntüye dönüştürülemedi")
+                            viewModel.errorMessage = "PDF dosyası işlenemedi. Lütfen geçerli bir PDF dosyası seçin."
+                        }
+                    } else {
+                        // Resim dosyası kontrolü
+                        print("🖼️ Resim dosyası seçildi: \(localUrl.lastPathComponent)")
+                        
+                        let canAccess = localUrl.startAccessingSecurityScopedResource()
+                        defer {
+                            if canAccess {
+                                localUrl.stopAccessingSecurityScopedResource()
+                            }
+                        }
+                        
+                        if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
+                            print("✅ Resim yüklendi, boyut: \(img.size)")
+                            await viewModel.scanInvoice(image: img)
+                        } else {
+                            print("❌ Resim yüklenemedi")
+                            viewModel.errorMessage = "Resim dosyası yüklenemedi. Lütfen geçerli bir resim dosyası seçin."
+                        }
                     }
                 }
             }

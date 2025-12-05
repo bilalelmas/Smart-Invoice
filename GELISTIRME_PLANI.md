@@ -12,13 +12,17 @@
 - ✅ Trendyol pazaryeri satıcı tespiti
 - ✅ Fiyat girişi sorunları düzeltildi
 - ✅ Kaydedilen faturaları düzenleme özelliği
+- ✅ Async/Await migration (OCRService, InvoiceParser, InvoiceViewModel, EvaluationService)
+- ✅ Dependency Injection (Protocols, DIContainer, Constructor Injection)
+- ✅ Performance optimizasyonları (Image preprocessing, Regex cache, Lazy loading)
+- ✅ Arama ve filtreleme (Metin, tarih, tutar, satıcı bazlı)
 
 ### 📈 Genel Değerlendirme
-- **Mimari**: ⭐⭐⭐⭐☆ (4/5) - İyi, DI eksik
-- **Kod Kalitesi**: ⭐⭐⭐⭐☆ (4/5) - İyi, test coverage düşük
-- **Test Coverage**: ⭐⭐☆☆☆ (2/5) - Düşük, acil iyileştirme gerekli
+- **Mimari**: ⭐⭐⭐⭐⭐ (5/5) - DI ile iyileştirildi
+- **Kod Kalitesi**: ⭐⭐⭐⭐☆ (4/5) - İyi, test coverage iyileştirilmeli
+- **Test Coverage**: ⭐⭐⭐☆☆ (3/5) - Test dosyaları oluşturuldu, coverage artırılmalı
 - **Dokümantasyon**: ⭐⭐⭐☆☆ (3/5) - Orta, API dokümantasyonu eksik
-- **Performans**: ⭐⭐⭐⭐☆ (4/5) - İyi, optimizasyonlar yapılabilir
+- **Performans**: ⭐⭐⭐⭐⭐ (5/5) - Optimizasyonlar tamamlandı
 
 ---
 
@@ -30,11 +34,11 @@
 **Hedef**: Modern Swift concurrency'ye geçiş
 
 **Görevler**:
-- [ ] `OCRService.recognizeText()` → async/await
-- [ ] `InvoiceParser.parse()` → async/await (zaten throws, async ekle)
-- [ ] `InvoiceViewModel` completion handler'ları → async/await
-- [ ] `EvaluationService` async/await migration
-- [ ] Error handling async context'te
+- [x] `OCRService.recognizeText()` → async/await
+- [x] `InvoiceParser.parse()` → async/await (zaten throws, async ekle)
+- [x] `InvoiceViewModel` completion handler'ları → async/await
+- [x] `EvaluationService` async/await migration
+- [x] Error handling async context'te
 
 **Faydalar**:
 - Daha okunabilir kod
@@ -47,13 +51,14 @@
 **Hedef**: Test edilebilirliği artırma
 
 **Görevler**:
-- [ ] Protocol-based servisler oluştur
-  - [ ] `OCRServiceProtocol`
-  - [ ] `InvoiceParserProtocol`
-  - [ ] `FirebaseRepositoryProtocol`
-- [ ] `InvoiceViewModel`'e DI ekle
-- [ ] Mock servisler oluştur (test için)
-- [ ] Singleton pattern'i kaldır (InvoiceParser)
+- [x] Protocol-based servisler oluştur
+  - [x] `OCRServiceProtocol`
+  - [x] `InvoiceParserProtocol`
+  - [x] `FirebaseRepositoryProtocol`
+- [x] `InvoiceViewModel`'e DI ekle
+- [x] DIContainer oluşturuldu
+- [ ] Mock servisler oluştur (test için) - Kısmen
+- [ ] Singleton pattern'i kaldır (InvoiceParser) - Hala kullanılıyor ama DI ile
 
 **Faydalar**:
 - Unit test yazılabilirliği
@@ -66,15 +71,16 @@
 **Hedef**: %70+ test coverage
 
 **Görevler**:
-- [ ] `InvoiceParser` unit testleri
-  - [ ] Tarih çıkarımı testleri
-  - [ ] Tutar çıkarımı testleri
-  - [ ] Satıcı bilgisi çıkarımı testleri
-  - [ ] Regex pattern testleri
-- [ ] `RegexPatterns` testleri
-- [ ] `VendorProfile` testleri (Trendyol, A101, FLO)
-- [ ] `TextBlock` koordinat dönüşümü testleri
-- [ ] `InvoiceViewModel` testleri (mock servislerle)
+- [x] `InvoiceParser` unit testleri
+  - [x] Tarih çıkarımı testleri
+  - [x] Tutar çıkarımı testleri
+  - [x] Satıcı bilgisi çıkarımı testleri
+  - [x] Regex pattern testleri
+- [x] `RegexPatterns` testleri
+- [x] `VendorProfile` testleri (Trendyol, A101, FLO)
+- [x] `TextBlock` koordinat dönüşümü testleri
+- [x] `InvoiceViewModel` testleri (mock servislerle)
+- [ ] Test coverage %70+ hedefine ulaşıldı mı? - Kontrol edilmeli
 
 **Faydalar**:
 - Regression bug'ları önleme
@@ -87,13 +93,13 @@
 **Hedef**: OCR ve parsing performansı iyileştirme
 
 **Görevler**:
-- [ ] Büyük görseller için image preprocessing
-  - [ ] Resize (max 2000px)
-  - [ ] Kontrast artırma
-  - [ ] Gürültü azaltma
-- [ ] Regex cache optimizasyonu (zaten var, iyileştir)
-- [ ] Lazy loading (büyük fatura listeleri için)
-- [ ] Background processing iyileştirmeleri
+- [x] Büyük görseller için image preprocessing
+  - [x] Resize (min 800px, max 3000px)
+  - [x] Kontrast artırma
+  - [x] Gürültü azaltma
+- [x] Regex cache optimizasyonu (LRU strategy ile)
+- [x] Lazy loading (büyük fatura listeleri için pagination)
+- [x] Background processing iyileştirmeleri
 
 **Faydalar**:
 - Daha hızlı OCR işlemi
@@ -216,11 +222,11 @@
 **Hedef**: Faturaları kolayca bulma
 
 **Görevler**:
-- [ ] Metin bazlı arama (satıcı, fatura no, vb.)
-- [ ] Tarih aralığı filtreleme
-- [ ] Tutar aralığı filtreleme
-- [ ] Satıcı bazlı filtreleme
-- [ ] Durum bazlı filtreleme
+- [x] Metin bazlı arama (satıcı, fatura no, ETTN)
+- [x] Tarih aralığı filtreleme
+- [x] Tutar aralığı filtreleme
+- [x] Satıcı bazlı filtreleme
+- [ ] Durum bazlı filtreleme - Eksik
 
 **Faydalar**:
 - Hızlı fatura bulma

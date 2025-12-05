@@ -14,6 +14,13 @@ class InvoiceViewModel: ObservableObject {
     @Published var isProcessing: Bool = false // Yükleniyor animasyonu için
     @Published var errorMessage: String?
     
+    // Filtreleme ve Arama
+    @Published var searchText: String = ""
+    @Published var selectedVendor: String? = nil
+    @Published var selectedStatus: InvoiceStatus? = nil
+    @Published var dateRange: ClosedRange<Date>? = nil
+    @Published var amountRange: ClosedRange<Double>? = nil
+    
     // Servisler (Dependency Injection)
     private let ocrService: OCRServiceProtocol
     private let invoiceParser: InvoiceParserProtocol
@@ -127,5 +134,64 @@ class InvoiceViewModel: ObservableObject {
         self.currentDraftInvoice = editableInvoice
         self.originalOCRInvoice = nil // Düzenleme için orijinal OCR yok
         self.currentImage = nil // Kaydedilmiş faturalarda görsel yok
+    }
+    
+    // MARK: - Filtreleme ve Arama
+    
+    /// Filtrelenmiş fatura listesini döndürür
+    var filteredInvoices: [Invoice] {
+        var result = invoices
+        
+        // Metin araması (satıcı, fatura no, ETTN)
+        if !searchText.isEmpty {
+            let searchLower = searchText.lowercased()
+            result = result.filter { invoice in
+                let merchantMatch = invoice.merchantName.lowercased().contains(searchLower)
+                let numberMatch = invoice.invoiceNo.lowercased().contains(searchLower)
+                let ettnMatch = invoice.ettn.lowercased().contains(searchLower)
+                return merchantMatch || numberMatch || ettnMatch
+            }
+        }
+        
+        // Satıcı filtresi
+        if let vendor = selectedVendor, !vendor.isEmpty {
+            result = result.filter { $0.merchantName == vendor }
+        }
+        
+        // Durum filtresi
+        if let status = selectedStatus {
+            result = result.filter { $0.status == status }
+        }
+        
+        // Tarih aralığı filtresi
+        if let dateRange = dateRange {
+            result = result.filter { dateRange.contains($0.invoiceDate) }
+        }
+        
+        // Tutar aralığı filtresi
+        if let amountRange = amountRange {
+            result = result.filter { amountRange.contains($0.totalAmount) }
+        }
+        
+        return result
+    }
+    
+    /// Tüm benzersiz satıcı isimlerini döndürür
+    var uniqueVendors: [String] {
+        Array(Set(invoices.map { $0.merchantName })).sorted()
+    }
+    
+    /// Filtreleri temizler
+    func clearFilters() {
+        searchText = ""
+        selectedVendor = nil
+        selectedStatus = nil
+        dateRange = nil
+        amountRange = nil
+    }
+    
+    /// Filtrelerin aktif olup olmadığını kontrol eder
+    var hasActiveFilters: Bool {
+        !searchText.isEmpty || selectedVendor != nil || selectedStatus != nil || dateRange != nil || amountRange != nil
     }
 }

@@ -21,6 +21,12 @@ struct InvoiceEditView: View {
     @State private var taxAmountText: String = ""
     @State private var isInitialized: Bool = false
     
+    // Form validasyonu ve geri bildirim
+    @State private var validationErrors: [String] = []
+    @State private var showSuccessMessage = false
+    @State private var autoSaveTask: Task<Void, Never>?
+    @State private var hasUnsavedChanges = false
+    
     // View yüklendiğinde değerleri String'e çevir (sadece ilk yüklemede)
     private func initializeAmountTexts() {
         guard !isInitialized else { return }
@@ -50,6 +56,62 @@ struct InvoiceEditView: View {
         let cleaned = text.replacingOccurrences(of: ".", with: "")
             .replacingOccurrences(of: ",", with: ".")
         return Double(cleaned) ?? 0.0
+    }
+    
+    // Form validasyonu
+    private func validateForm() -> Bool {
+        validationErrors.removeAll()
+        
+        if invoice.merchantName.trimmingCharacters(in: .whitespaces).isEmpty {
+            validationErrors.append("Satıcı adı boş olamaz")
+        }
+        
+        if invoice.totalAmount <= 0 {
+            validationErrors.append("Toplam tutar 0'dan büyük olmalıdır")
+        }
+        
+        // KDV kontrolü: Ara toplam + KDV = Toplam tutar olmalı (tolerans: 0.01)
+        let calculatedTotal = invoice.subTotal + invoice.taxAmount
+        if abs(calculatedTotal - invoice.totalAmount) > 0.01 {
+            validationErrors.append("Ara toplam + KDV, toplam tutara eşit olmalıdır")
+        }
+        
+        return validationErrors.isEmpty
+    }
+    
+    // Auto-save tetikleme (debounce ile)
+    private func triggerAutoSave() {
+        hasUnsavedChanges = true
+        
+        // Önceki task'ı iptal et
+        autoSaveTask?.cancel()
+        
+        // Yeni task oluştur (2 saniye sonra)
+        autoSaveTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 saniye
+            
+            if !Task.isCancelled {
+                await MainActor.run {
+                    if validateForm() {
+                        // Sessizce kaydet (kullanıcıya bildirim göster)
+                        invoice.totalAmount = parseAmount(totalAmountText)
+                        invoice.subTotal = parseAmount(subTotalText)
+                        invoice.taxAmount = parseAmount(taxAmountText)
+                        
+                        // Başarı animasyonu göster
+                        withAnimation(.spring(response: 0.3)) {
+                            showSuccessMessage = true
+                        }
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation(.spring(response: 0.3)) {
+                                showSuccessMessage = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     
     var body: some View {
@@ -166,8 +228,9 @@ struct InvoiceEditView: View {
                                     .multilineTextAlignment(.trailing)
                                     .font(.title3.bold())
                                     .foregroundColor(.blue)
-                                    .onChange(of: totalAmountText) {
-                                        invoice.totalAmount = parseAmount(totalAmountText)
+                                    .onChange(of: totalAmountText) { _, newValue in
+                                        invoice.totalAmount = parseAmount(newValue)
+                                        triggerAutoSave()
                                     }
                             }
                             
@@ -180,8 +243,9 @@ struct InvoiceEditView: View {
                                 TextField("0,00", text: $subTotalText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
-                                    .onChange(of: subTotalText) {
-                                        invoice.subTotal = parseAmount(subTotalText)
+                                    .onChange(of: subTotalText) { _, newValue in
+                                        invoice.subTotal = parseAmount(newValue)
+                                        triggerAutoSave()
                                     }
                             }
                             
@@ -194,9 +258,27 @@ struct InvoiceEditView: View {
                                 TextField("0,00", text: $taxAmountText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
-                                    .onChange(of: taxAmountText) {
-                                        invoice.taxAmount = parseAmount(taxAmountText)
+                                    .onChange(of: taxAmountText) { _, newValue in
+                                        invoice.taxAmount = parseAmount(newValue)
+                                        triggerAutoSave()
                                     }
+                            }
+                            
+                            // Validasyon uyarıları
+                            if !validationErrors.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(validationErrors, id: \.self) { error in
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .foregroundColor(.orange)
+                                                .font(.caption)
+                                            Text(error)
+                                                .font(.caption)
+                                                .foregroundColor(.orange)
+                                        }
+                                    }
+                                }
+                                .padding(.top, 8)
                             }
                         }
                         .padding()
@@ -210,18 +292,38 @@ struct InvoiceEditView: View {
                             invoice.totalAmount = parseAmount(totalAmountText)
                             invoice.subTotal = parseAmount(subTotalText)
                             invoice.taxAmount = parseAmount(taxAmountText)
-                            onSave()
+                            
+                            if validateForm() {
+                                // Haptic feedback
+                                let generator = UINotificationFeedbackGenerator()
+                                generator.notificationOccurred(.success)
+                                
+                                onSave()
+                                hasUnsavedChanges = false
+                            } else {
+                                // Hata feedback
+                                let generator = UINotificationFeedbackGenerator()
+                                generator.notificationOccurred(.error)
+                            }
                         }) {
-                            Text("Değişiklikleri Onayla ve Kaydet")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(16)
-                                .shadow(radius: 5)
+                            HStack {
+                                if !validationErrors.isEmpty {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                } else {
+                                    Image(systemName: "checkmark.circle.fill")
+                                }
+                                Text(validationErrors.isEmpty ? "Değişiklikleri Onayla ve Kaydet" : "Lütfen Hataları Düzeltin")
+                            }
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(validationErrors.isEmpty ? Color.blue : Color.orange)
+                            .cornerRadius(16)
+                            .shadow(radius: 5)
                         }
                         .padding(.top, 10)
+                        .disabled(!validationErrors.isEmpty)
                         
                         Spacer(minLength: 50)
                     }
@@ -235,14 +337,37 @@ struct InvoiceEditView: View {
                     Button("İptal") { onCancel() }
                 }
             }
+            .overlay(alignment: .top) {
+                // Auto-save başarı mesajı
+                if showSuccessMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.white)
+                        Text("Otomatik kaydedildi")
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.green)
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .onAppear {
                 initializeAmountTexts()
+                _ = validateForm() // İlk validasyonu çalıştır
             }
-            .onChange(of: invoice.totalAmount) {
+            .onChange(of: invoice.totalAmount) { _, _ in
                 // Invoice değerleri değiştiğinde (dışarıdan güncelleme) state'leri güncelle
                 if !isInitialized {
                     initializeAmountTexts()
                 }
+            }
+            .onChange(of: invoice.merchantName) { _, _ in
+                triggerAutoSave()
             }
         }
     }
