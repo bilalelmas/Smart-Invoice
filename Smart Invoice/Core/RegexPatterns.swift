@@ -117,16 +117,49 @@ struct RegexPatterns {
         static let splitters = ["SAYIN", "ALICI", "MÜŞTERİ", "TESLİMAT ADRESİ"]
         
         /// Tutar Tespiti için "Ödenecek Tutar" (En Alt Satır) Anahtar Kelimeleri
-        static let payableAmounts = ["ÖDENECEK", "GENEL TOPLAM", "VERGİLER DAHİL", "TOPLAM TUTAR"]
+        /// Faturaların %90'ında bu kelimeler son tutarı belirtir
+        static let payableAmounts = [
+            "VERGİLER DAHİL TOPLAM TUTAR",
+            "VERGİLER DAHIL TOPLAM TUTAR",
+            "ÖDENECEK TUTAR",
+            "ÖDENECEK"
+        ]
         
-        /// Ara Toplam (Matrah) Anahtar Kelimeleri
-        static let subTotalAmounts = ["MAL HİZMET", "TOPLAM İSKONTO", "KDV MATRAHI", "ARA TOPLAM", "TOPLAM TUTAR (KDV HARİÇ)", "KDV HARİÇ"]
+        /// Ara Toplam (Matrah) Anahtar Kelimeleri - KDV Hariç Tutar
+        /// "MAL HİZMET TOPLAM TUTARI" bazı faturalarda vergiler dahil, bazılarında hariç olabilir
+        /// Bu yüzden özel kontrol gerekiyor
+        static let subTotalAmounts = [
+            "MAL HİZMET TUTAR (KDV HARİÇ)",
+            "MAL HİZMET TUTAR (KDV HARIC)",
+            "KDV MATRAHI", "KDV MATRAH", "MATRAH",
+            "ARA TOPLAM", "ARA TOPLAM TUTAR", "TOPLAM TUTAR (KDV HARİÇ)", 
+            "KDV HARİÇ", "KDV HARIC", "VERGİ HARİÇ", "VERGİ HARIC",
+            "NET TUTAR (KDV HARİÇ)", "KDV'SİZ TUTAR", "KDVSİZ TUTAR",
+            "TOPLAM (KDV HARİÇ)", "TOPLAM (KDV HARIC)", "TUTAR (KDV HARİÇ)"
+        ]
+        
+        /// "Mal Hizmet Toplam Tutarı" - Özel kontrol gerektirir (bazı faturalarda dahil, bazılarında hariç)
+        static let malHizmetKeywords = [
+            "MAL HİZMET TOPLAM TUTARI",
+            "MAL HİZMET TOPLAM TUTAR",
+            "MAL HİZMET TUTARI"
+        ]
         
         /// Tutar Tespiti için Kara Liste (Bunları Toplam sanma!)
-        static let amountBlacklist = ["HARIÇ", "HARIC", "MATRAH", "NET", "KDV'SİZ", "KDVSİZ", "İSKONTO", "ISKONTO"]
+        static let amountBlacklist = [
+            "HARIÇ", "HARIC", "MATRAH", "NET", "KDV'SİZ", "KDVSİZ", 
+            "İSKONTO", "ISKONTO", "İNDİRİM", "INDIRIM", "İADE", "IADE"
+        ]
         
         /// KDV (Vergi) Tutarını Bulmak İçin Anahtar Kelimeler
-        static let taxAmounts = ["HESAPLANAN KDV", "TOPLAM KDV", "KDV TUTARI", "HESAPLANAN KATMA DEĞER VERGİSİ", "KDV (%18)", "KDV (%20)", "KDV (%10)"]
+        static let taxAmounts = [
+            "HESAPLANAN KDV", "TOPLAM KDV", "KDV TUTARI", "KDV TUTAR",
+            "HESAPLANAN KATMA DEĞER VERGİSİ", "KATMA DEĞER VERGİSİ",
+            "KDV (%18)", "KDV (%20)", "KDV (%10)", "KDV (%1)",
+            "KDV 18", "KDV 20", "KDV 10", "KDV 1",
+            "TOPLAM KDV TUTARI", "HESAPLANAN KDV TUTARI",
+            "KDV", "VERGİ", "VERGI"
+        ]
         
         /// Tarih Etiketleri
         static let dateTargets = ["FATURA TARİHİ", "DÜZENLEME TARİHİ", "DÜZENLEME ZAMANI"]

@@ -37,6 +37,24 @@ class InvoiceViewModel: ObservableObject {
         self.repository = repository
     }
     
+    /// Firebase'den tüm faturaları yükler
+    @MainActor
+    func loadInvoices() async {
+        self.isProcessing = true
+        self.errorMessage = nil
+        
+        do {
+            let loadedInvoices = try await repository.getAllInvoices()
+            self.invoices = loadedInvoices
+            print("✅ \(loadedInvoices.count) fatura yüklendi")
+        } catch {
+            self.errorMessage = "Faturalar yüklenirken hata oluştu: \(error.localizedDescription)"
+            print("❌ Fatura yükleme hatası: \(error.localizedDescription)")
+        }
+        
+        self.isProcessing = false
+    }
+    
     /// Görüntüden fatura okuma sürecini başlatır
     @MainActor
     func scanInvoice(image: UIImage) async {
@@ -94,7 +112,33 @@ class InvoiceViewModel: ObservableObject {
                     print("✅ Fatura başarıyla güncellendi. ID: \(invoiceId)")
                 }
             } else {
-                // Yeni fatura ekle
+                // Yeni fatura eklemeden önce ETTN ile duplicate kontrolü yap
+                if !invoice.ettn.isEmpty {
+                    if let existingInvoice = try await repository.findInvoiceByETTN(invoice.ettn) {
+                        // Aynı ETTN'ye sahip fatura bulundu
+                        if let existingId = existingInvoice.id {
+                            // Mevcut faturayı güncelle
+                            invoice.id = existingId
+                            try await repository.updateInvoice(invoice)
+                            
+                            // Listede de güncelle
+                            if let index = invoices.firstIndex(where: { $0.id == existingId }) {
+                                self.invoices[index] = invoice
+                            } else {
+                                // Eğer listede yoksa ekle (yeniden yükleme gerekebilir)
+                                self.invoices.insert(invoice, at: 0)
+                            }
+                            
+                            self.currentDraftInvoice = nil
+                            self.currentImage = nil
+                            self.originalOCRInvoice = nil
+                            print("✅ Aynı ETTN'ye sahip fatura bulundu, güncellendi. ID: \(existingId)")
+                            return
+                        }
+                    }
+                }
+                
+                // Yeni fatura ekle (ETTN yoksa veya duplicate yoksa)
                 let invoiceId = try await repository.addInvoice(invoice)
                 invoice.id = invoiceId
                 

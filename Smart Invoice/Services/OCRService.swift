@@ -43,27 +43,34 @@ class OCRService: ObservableObject, OCRServiceProtocol {
             throw OCRServiceError.invalidImage
         }
         
-        // Önce orijinal görüntü ile OCR dene (preprocessing bazı görüntüleri bozabilir)
-        print("🔄 İlk deneme: Orijinal görüntü ile OCR (preprocessing olmadan)")
+        // Galeri görselleri için daha agresif preprocessing gerekebilir
+        // Orientation düzeltmesi yapıldı, şimdi preprocessing yapalım
+        // Önce preprocessing yapılmış görüntü ile OCR dene (galeri görselleri için önemli)
+        print("🔄 İlk deneme: Preprocessing yapılmış görüntü ile OCR")
+        let preprocessedImage = await preprocessImage(orientedImage)
+        guard let preprocessedCGImage = preprocessedImage.cgImage else {
+            await MainActor.run {
+                self.isProcessing = false
+                self.progress = 0.0
+            }
+            throw OCRServiceError.invalidImage
+        }
+        
         do {
-            let result = try await performOCR(on: originalCGImage, size: orientedImage.size, isRetry: false)
+            let result = try await performOCR(on: preprocessedCGImage, size: preprocessedImage.size, isRetry: false)
             return result
         } catch {
-            print("⚠️ Orijinal görüntü ile OCR başarısız (0 observation), preprocessing ile tekrar deneniyor...")
+            print("⚠️ Preprocessing yapılmış görüntü ile OCR başarısız, orijinal görüntü ile tekrar deneniyor...")
             
-            // Preprocessing ile tekrar dene
-            let processedImage = await preprocessImage(orientedImage)
-            print("🖼️ Preprocessing sonrası boyut: \(processedImage.size), scale: \(processedImage.scale)")
-            
-            guard let processedCGImage = processedImage.cgImage else {
-                // Preprocessing başarısız, orijinal hatayı fırlat
-                print("❌ Preprocessing başarısız, orijinal hata fırlatılıyor")
+            // Preprocessing başarısız olduysa orijinal görüntü ile tekrar dene
+            print("🔄 İkinci deneme: Orijinal görüntü ile OCR (preprocessing olmadan)")
+            do {
+                return try await performOCR(on: originalCGImage, size: orientedImage.size, isRetry: true)
+            } catch {
+                // Her iki deneme de başarısız, hatayı fırlat
+                print("❌ Tüm OCR denemeleri başarısız")
                 throw error
             }
-            
-            // Preprocessing'li görüntü ile tekrar dene
-            print("🔄 İkinci deneme: Preprocessing'li görüntü ile OCR")
-            return try await performOCR(on: processedCGImage, size: processedImage.size, isRetry: true)
         }
     }
     
@@ -309,7 +316,7 @@ class OCRService: ObservableObject, OCRServiceProtocol {
         return renderCIImage(enhancedCI, context: context, size: image.size) ?? image
     }
     
-    /// Görüntüyü iyileştirir (kontrast, parlaklık) - Galeri resimleri için
+    /// Görüntüyü iyileştirir (kontrast, parlaklık) - Galeri resimleri için agresif iyileştirme
     private func enhanceImage(_ image: UIImage) async -> UIImage {
         guard let ciImage = CIImage(image: image) else {
             print("⚠️ CIImage oluşturulamadı, orijinal görüntü döndürülüyor")
@@ -318,35 +325,71 @@ class OCRService: ObservableObject, OCRServiceProtocol {
         
         // Core Image filters
         let context = CIContext()
+        var currentImage = ciImage
         
-        // Kontrast ve parlaklık artırma (galeri resimleri için)
+        // 1. Gürültü azaltma (galeri görselleri için önemli)
+        if let noiseReductionFilter = CIFilter(name: "CINoiseReduction") {
+            // Set input image
+            noiseReductionFilter.setValue(currentImage, forKey: kCIInputImageKey)
+            // CINoiseReduction uses keys: inputNoiseLevel and inputSharpness
+            // Use typed properties when available, otherwise fall back to string keys
+            if noiseReductionFilter.responds(to: Selector(("setInputNoiseLevel:"))) {
+                // No direct setter available via Swift, keep KVC with proper key names
+                noiseReductionFilter.setValue(0.02, forKey: "inputNoiseLevel")
+            } else {
+                noiseReductionFilter.setValue(0.02, forKey: "inputNoiseLevel")
+            }
+            if noiseReductionFilter.responds(to: Selector(("setInputSharpness:"))) {
+                noiseReductionFilter.setValue(0.4, forKey: "inputSharpness")
+            } else {
+                noiseReductionFilter.setValue(0.4, forKey: "inputSharpness")
+            }
+            if let output = noiseReductionFilter.outputImage {
+                currentImage = output
+                print("✅ Gürültü azaltma uygulandı")
+            }
+        }
+        
+        // 2. Kontrast ve parlaklık artırma (galeri resimleri için daha agresif)
         guard let contrastFilter = CIFilter(name: "CIColorControls") else {
             print("⚠️ CIColorControls filter bulunamadı")
             return image
         }
-        contrastFilter.setValue(ciImage, forKey: kCIInputImageKey)
-        contrastFilter.setValue(1.3, forKey: kCIInputContrastKey) // %30 kontrast artışı
-        contrastFilter.setValue(1.1, forKey: kCIInputBrightnessKey) // %10 parlaklık artışı
-        contrastFilter.setValue(1.05, forKey: kCIInputSaturationKey) // %5 doygunluk artışı
+        contrastFilter.setValue(currentImage, forKey: kCIInputImageKey)
+        contrastFilter.setValue(1.4, forKey: kCIInputContrastKey) // %40 kontrast artışı (daha agresif)
+        contrastFilter.setValue(1.15, forKey: kCIInputBrightnessKey) // %15 parlaklık artışı
+        contrastFilter.setValue(1.1, forKey: kCIInputSaturationKey) // %10 doygunluk artışı
         
         guard let enhancedCI = contrastFilter.outputImage else {
             print("⚠️ Enhanced CIImage oluşturulamadı")
             return image
         }
+        currentImage = enhancedCI
         
-        // Sharpening ekle (metin okunabilirliğini artırır)
-        guard let sharpenFilter = CIFilter(name: "CISharpenLuminance") else {
-            // Sharpening filter yoksa sadece kontrast artırılmış görüntüyü döndür
-            return renderCIImage(enhancedCI, context: context, size: image.size) ?? image
+        // 3. Sharpening ekle (metin okunabilirliğini artırır - daha agresif)
+        if let sharpenFilter = CIFilter(name: "CISharpenLuminance") {
+            sharpenFilter.setValue(currentImage, forKey: kCIInputImageKey)
+            // CISharpenLuminance uses keys: inputSharpness and inputRadius
+            sharpenFilter.setValue(0.6, forKey: kCIInputSharpnessKey)
+            sharpenFilter.setValue(0.4, forKey: kCIInputRadiusKey)
+            if let sharpenedCI = sharpenFilter.outputImage {
+                currentImage = sharpenedCI
+                print("✅ Sharpening uygulandı")
+            }
         }
-        sharpenFilter.setValue(enhancedCI, forKey: kCIInputImageKey)
-        sharpenFilter.setValue(0.4, forKey: kCIInputSharpnessKey) // Orta seviye keskinleştirme
         
-        guard let finalCI = sharpenFilter.outputImage else {
-            return renderCIImage(enhancedCI, context: context, size: image.size) ?? image
+        // 4. Exposure düzeltmesi (galeri görselleri için)
+        if let exposureFilter = CIFilter(name: "CIExposureAdjust") {
+            exposureFilter.setValue(currentImage, forKey: kCIInputImageKey)
+            exposureFilter.setValue(0.2, forKey: kCIInputEVKey) // Hafif exposure artışı
+            
+            if let exposedCI = exposureFilter.outputImage {
+                currentImage = exposedCI
+                print("✅ Exposure düzeltmesi uygulandı")
+            }
         }
         
-        return renderCIImage(finalCI, context: context, size: image.size) ?? image
+        return renderCIImage(currentImage, context: context, size: image.size) ?? image
     }
     
     /// CIImage'i UIImage'e dönüştürür

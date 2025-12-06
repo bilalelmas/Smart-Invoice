@@ -166,6 +166,14 @@ struct MainTabView: View {
                 image: viewModel.currentImage
             )
         }
+        .onAppear {
+            // Uygulama açıldığında faturaları yükle
+            if viewModel.invoices.isEmpty {
+                Task {
+                    await viewModel.loadInvoices()
+                }
+            }
+        }
     }
 }
 

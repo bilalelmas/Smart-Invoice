@@ -29,5 +29,11 @@ protocol FirebaseInvoiceRepositoryProtocol {
     /// - Parameter trainingData: Eğitim verisi
     /// - Throws: Firestore hataları
     func addTrainingData(_ trainingData: TrainingData) async throws
+    
+    /// ETTN numarası ile fatura ara
+    /// - Parameter ettn: ETTN numarası
+    /// - Returns: Bulunan fatura (varsa), nil (yoksa)
+    /// - Throws: Firestore hataları
+    func findInvoiceByETTN(_ ettn: String) async throws -> Invoice?
 }
 

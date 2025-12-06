@@ -34,5 +34,20 @@ class FirebaseInvoiceRepository: FirebaseInvoiceRepositoryProtocol {
     func addTrainingData(_ trainingData: TrainingData) async throws {
         _ = try db.collection("training_data").addDocument(from: trainingData)
     }
+    
+    func findInvoiceByETTN(_ ettn: String) async throws -> Invoice? {
+        guard !ettn.isEmpty else { return nil }
+        
+        let snapshot = try await db.collection("invoices")
+            .whereField("ettn", isEqualTo: ettn)
+            .limit(to: 1)
+            .getDocuments()
+        
+        guard let document = snapshot.documents.first else {
+            return nil
+        }
+        
+        return try? document.data(as: Invoice.self)
+    }
 }
 

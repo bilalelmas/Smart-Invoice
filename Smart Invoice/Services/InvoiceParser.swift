@@ -81,13 +81,18 @@ class InvoiceParser: InvoiceParserProtocol {
         if !blocks.isEmpty {
             invoice.items = extractLineItemsSpatial(lines: lines)
             invoice.totalAmount = extractTotalAmountSpatial(lines: lines)
-            invoice.taxAmount = extractTaxAmountSpatial(lines: lines)
-            invoice.subTotal = extractSubTotalSpatial(lines: lines)
+            // Önce subTotal'i bul, sonra taxAmount'u subTotal'e göre doğrula
+            invoice.subTotal = extractSubTotalSpatial(lines: lines, totalAmount: invoice.totalAmount)
+            invoice.taxAmount = extractTaxAmountSpatial(lines: lines, subTotal: invoice.subTotal)
         } else {
             invoice.items = extractLineItems(from: cleanLines)
             invoice.totalAmount = extractTotalAmount(from: fullText)
+            invoice.subTotal = extractSubTotal(from: fullText, totalAmount: invoice.totalAmount)
             invoice.taxAmount = extractTaxAmount(from: fullText)
         }
+        
+        // 4.5. Tutarları doğrula ve düzelt
+        validateAndFixAmounts(&invoice)
         
         // 5. Profil Uygulama
         let textLower = fullText.lowercased()
@@ -297,6 +302,8 @@ class InvoiceParser: InvoiceParserProtocol {
     // MARK: - 📍 Konumsal Tutar Analizi
     
     private func extractTotalAmountSpatial(lines: [TextLine]) -> Double {
+        var candidates: [Double] = []
+        
         // Alttan yukarı doğru tara (Genelde toplam en alttadır)
         for (index, line) in lines.enumerated().reversed() {
             let upper = line.text.uppercased()
@@ -308,51 +315,156 @@ class InvoiceParser: InvoiceParserProtocol {
             if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
                 // 1. Aynı satırda ara (En sağdaki değer)
                 if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
-                    return amount
+                    candidates.append(amount)
                 }
-                // Blok bazlı bulamazsa tüm satırda ara
-                if let amount = findAmountInString(line.text) {
-                    return amount
+                // Blok bazlı bulamazsa tüm satırda ara (tüm tutarları bul)
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
                 }
                 
                 // 2. Bir alt satırda ara (Label üstte, değer altta ise)
                 if index + 1 < lines.count {
                     let nextLine = lines[index + 1]
                     // Alt satırda sayı varsa ve çok uzak değilse
-                    if let amount = findAmountInString(nextLine.text) {
-                        return amount
+                    let nextAmounts = findAllAmountsInString(nextLine.text)
+                    for amt in nextAmounts {
+                        if amt > 0 {
+                            candidates.append(amt)
+                        }
                     }
                 }
             }
         }
-        return 0.0
+        
+        // En büyük tutarı döndür (genelde toplam en büyüktür)
+        return candidates.max() ?? 0.0
     }
     
-    private func extractTaxAmountSpatial(lines: [TextLine]) -> Double {
-        for line in lines.reversed() {
+    private func extractTaxAmountSpatial(lines: [TextLine], subTotal: Double = 0.0) -> Double {
+        var candidates: [Double] = []
+        
+        for (index, line) in lines.enumerated().reversed() {
             let upper = line.text.uppercased()
+            
+            // KDV ile ilgili kelimeleri kontrol et
             if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) {
-                // En sağdaki değeri al
+                // 1. Aynı satırda ara (En sağdaki değer)
                 if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
-                    return amount
+                    candidates.append(amount)
                 }
-                if let amount = findAmountInString(line.text) {
-                    return amount
+                // Tüm satırda ara
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
+                }
+                
+                // 2. Bir alt satırda ara (Label üstte, değer altta ise)
+                if index + 1 < lines.count {
+                    let nextLine = lines[index + 1]
+                    let nextAmounts = findAllAmountsInString(nextLine.text)
+                    for amt in nextAmounts {
+                        if amt > 0 {
+                            candidates.append(amt)
+                        }
+                    }
                 }
             }
         }
-        return 0.0
+        
+        // KDV tutarı matrahtan küçük olmalı (çünkü %20'ye kadar bir oran var)
+        let maxCandidate = candidates.max() ?? 0.0
+        if subTotal > 0 {
+            let maxTaxRate = 0.20 // %20
+            let expectedMaxTax = subTotal * maxTaxRate
+            // Eğer bulunan KDV matrahtan büyükse, muhtemelen yanlış
+            if maxCandidate > expectedMaxTax {
+                // Matrahın %18'ini dene (en yaygın KDV oranı)
+                return subTotal * 0.18
+            }
+        }
+        
+        return maxCandidate
     }
     
-    private func extractSubTotalSpatial(lines: [TextLine]) -> Double {
-        for line in lines.reversed() {
+    private func extractSubTotalSpatial(lines: [TextLine], totalAmount: Double) -> Double {
+        var candidates: [Double] = []
+        var malHizmetCandidates: [Double] = []
+        
+        for (index, line) in lines.enumerated().reversed() {
             let upper = line.text.uppercased()
-            // Ara Toplam / Matrah Kelimeleri
+            
+            // "Mal Hizmet Toplam Tutarı" özel kontrolü
+            if RegexPatterns.Keywords.malHizmetKeywords.contains(where: { upper.contains($0) }) {
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        malHizmetCandidates.append(amt)
+                    }
+                }
+                // Bir alt satırda da ara
+                if index + 1 < lines.count {
+                    let nextLine = lines[index + 1]
+                    let nextAmounts = findAllAmountsInString(nextLine.text)
+                    for amt in nextAmounts {
+                        if amt > 0 {
+                            malHizmetCandidates.append(amt)
+                        }
+                    }
+                }
+            }
+            
+            // Ara Toplam / Matrah Kelimeleri (KDV Hariç belirten)
             if RegexPatterns.Keywords.subTotalAmounts.contains(where: { upper.contains($0) }) {
-                 if let amount = findAmountInString(line.text) { return amount }
+                // 1. Aynı satırda ara (En sağdaki değer)
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    candidates.append(amount)
+                }
+                // Tüm satırda ara
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
+                }
+                
+                // 2. Bir alt satırda ara (Label üstte, değer altta ise)
+                if index + 1 < lines.count {
+                    let nextLine = lines[index + 1]
+                    let nextAmounts = findAllAmountsInString(nextLine.text)
+                    for amt in nextAmounts {
+                        if amt > 0 {
+                            candidates.append(amt)
+                        }
+                    }
+                }
             }
         }
-        return 0.0
+        
+        // "Mal Hizmet Toplam Tutarı" kontrolü
+        // Eğer totalAmount'a yakınsa (fark %5'ten az), vergiler dahil demektir, kullanma
+        // Eğer totalAmount'tan küçükse, vergiler hariç olabilir
+        if let malHizmetAmount = malHizmetCandidates.max(), malHizmetAmount > 0 {
+            if totalAmount > 0 {
+                let difference = abs(malHizmetAmount - totalAmount)
+                let percentage = (difference / totalAmount) * 100
+                // Eğer fark %5'ten fazlaysa, vergiler hariç olabilir
+                if percentage > 5.0 {
+                    candidates.append(malHizmetAmount)
+                }
+            } else {
+                // TotalAmount yoksa, mal hizmet tutarını kullan
+                candidates.append(malHizmetAmount)
+            }
+        }
+        
+        // Matrah genelde toplam tutardan küçük ama KDV'den büyüktür
+        // En büyük adayı alalım
+        return candidates.max() ?? 0.0
     }
     
     // MARK: - Logic with RegexPatterns
@@ -400,6 +512,102 @@ class InvoiceParser: InvoiceParserProtocol {
         return 0.0
     }
     
+    private func extractSubTotal(from text: String, totalAmount: Double) -> Double {
+        let lines = text.components(separatedBy: .newlines)
+        var candidates: [Double] = []
+        var malHizmetCandidates: [Double] = []
+        
+        for line in lines.reversed() {
+            let upper = line.uppercased()
+            
+            // "Mal Hizmet Toplam Tutarı" özel kontrolü
+            if RegexPatterns.Keywords.malHizmetKeywords.contains(where: { upper.contains($0) }) {
+                if let amount = findAmountInString(line) {
+                    malHizmetCandidates.append(amount)
+                }
+            }
+            
+            // Ara Toplam / Matrah Kelimeleri (KDV Hariç belirten)
+            if RegexPatterns.Keywords.subTotalAmounts.contains(where: { upper.contains($0) }) {
+                if let amount = findAmountInString(line) {
+                    candidates.append(amount)
+                }
+            }
+        }
+        
+        // "Mal Hizmet Toplam Tutarı" kontrolü
+        if let malHizmetAmount = malHizmetCandidates.max(), malHizmetAmount > 0 {
+            if totalAmount > 0 {
+                let difference = abs(malHizmetAmount - totalAmount)
+                let percentage = (difference / totalAmount) * 100
+                // Eğer fark %5'ten fazlaysa, vergiler hariç olabilir
+                if percentage > 5.0 {
+                    candidates.append(malHizmetAmount)
+                }
+            } else {
+                candidates.append(malHizmetAmount)
+            }
+        }
+        
+        return candidates.max() ?? 0.0
+    }
+    
+    /// Tutarları doğrula ve düzelt
+    /// - KDV tutarı matrahtan küçük olmalı (çünkü %20'ye kadar bir oran var)
+    /// - Matrah + KDV ≈ Toplam olmalı
+    private func validateAndFixAmounts(_ invoice: inout Invoice) {
+        // 1. KDV tutarının matrahtan küçük olduğunu kontrol et
+        if invoice.subTotal > 0 && invoice.taxAmount > 0 {
+            // KDV tutarı matrahtan büyükse, muhtemelen yanlış
+            // KDV genelde matrahın %1-20'si arasındadır
+            let maxTaxRate = 0.20 // %20
+            let expectedMaxTax = invoice.subTotal * maxTaxRate
+            
+            if invoice.taxAmount > expectedMaxTax {
+                // KDV tutarı çok büyük, muhtemelen yanlış
+                // Matrah ve KDV'yi yeniden hesapla
+                if invoice.totalAmount > 0 {
+                    // totalAmount = subTotal + taxAmount
+                    // taxAmount = totalAmount - subTotal
+                    let calculatedTax = invoice.totalAmount - invoice.subTotal
+                    if calculatedTax > 0 && calculatedTax <= expectedMaxTax {
+                        invoice.taxAmount = calculatedTax
+                    } else {
+                        // Hala mantıksızsa, KDV'yi matrahtan hesapla (varsayılan %18)
+                        invoice.taxAmount = invoice.subTotal * 0.18
+                    }
+                }
+            }
+        }
+        
+        // 2. Matrah + KDV ≈ Toplam kontrolü
+        if invoice.subTotal > 0 && invoice.taxAmount > 0 && invoice.totalAmount > 0 {
+            let calculatedTotal = invoice.subTotal + invoice.taxAmount
+            let difference = abs(calculatedTotal - invoice.totalAmount)
+            let percentage = (difference / invoice.totalAmount) * 100
+            
+            // Eğer fark %2'den fazlaysa, matrahı yeniden hesapla
+            if percentage > 2.0 {
+                // totalAmount = subTotal + taxAmount
+                // subTotal = totalAmount - taxAmount
+                let calculatedSubTotal = invoice.totalAmount - invoice.taxAmount
+                if calculatedSubTotal > 0 {
+                    invoice.subTotal = calculatedSubTotal
+                }
+            }
+        }
+        
+        // 3. Eğer matrah yoksa ama toplam ve KDV varsa, matrahı hesapla
+        if invoice.subTotal == 0 && invoice.totalAmount > 0 && invoice.taxAmount > 0 {
+            invoice.subTotal = invoice.totalAmount - invoice.taxAmount
+        }
+        
+        // 4. Eğer KDV yoksa ama toplam ve matrah varsa, KDV'yi hesapla
+        if invoice.taxAmount == 0 && invoice.totalAmount > 0 && invoice.subTotal > 0 {
+            invoice.taxAmount = invoice.totalAmount - invoice.subTotal
+        }
+    }
+    
     private func findAmountInString(_ text: String) -> Double? {
         // RegexPatterns.Amount.flexible kullanımı
         if let match = extractString(from: text, pattern: RegexPatterns.Amount.flexible) {
@@ -408,6 +616,32 @@ class InvoiceParser: InvoiceParserProtocol {
             return normalizeAmount(match)
         }
         return nil
+    }
+    
+    /// Bir string içindeki tüm tutarları bulur
+    private func findAllAmountsInString(_ text: String) -> [Double] {
+        var amounts: [Double] = []
+        
+        guard let regex = RegexPatterns.getRegex(pattern: RegexPatterns.Amount.flexible) else {
+            return amounts
+        }
+        
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        
+        for match in matches {
+            if let range = Range(match.range, in: text) {
+                let matchString = String(text[range])
+                // Yıl kontrolü
+                if matchString.count == 4 && matchString.starts(with: "202") { continue }
+                
+                let amount = normalizeAmount(matchString)
+                if amount > 0 {
+                    amounts.append(amount)
+                }
+            }
+        }
+        
+        return amounts
     }
 
     private func extractMerchantTaxID(from sellerLines: [String]) -> String {
@@ -750,3 +984,4 @@ class InvoiceParser: InvoiceParserProtocol {
         return min(score / totalWeight, 1.0)
     }
 }
+

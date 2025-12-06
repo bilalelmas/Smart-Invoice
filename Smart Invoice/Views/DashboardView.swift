@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DashboardView: View {
-    @StateObject var viewModel = InvoiceViewModel()
+    @ObservedObject var viewModel: InvoiceViewModel
     
     // Pagination
     @State private var displayedCount = 20 // İlk 20 fatura
@@ -114,6 +114,14 @@ struct DashboardView: View {
                                 Label("Filtreleri Temizle", systemImage: "xmark.circle.fill")
                                     .foregroundColor(.red)
                             }
+                        }
+                    }
+                }
+                .onAppear {
+                    // Uygulama açıldığında veya bu view göründüğünde faturaları yükle
+                    if viewModel.invoices.isEmpty {
+                        Task {
+                            await viewModel.loadInvoices()
                         }
                     }
                 }
@@ -620,12 +628,8 @@ struct DashboardView: View {
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
         
-        // Firebase'den yenileme (gelecekte implement edilecek)
-        // Şimdilik sadece UI'ı yeniliyoruz
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
-        
-        // ViewModel'deki faturaları yeniden yükle
-        // await viewModel.refreshInvoices()
+        // Firebase'den yeniden yükle
+        await viewModel.loadInvoices()
     }
 }
 

@@ -87,7 +87,22 @@ struct ProfileView: View {
                     Text("Tüm fatura verilerinizi muhasebe programlarına uygun formatta dışa aktarır.")
                 }
                 
-                // 4. Uygulama Ayarları
+                // 4. Model Eğitimi
+                Section {
+                    NavigationLink(destination: ModelTrainingView()) {
+                        HStack {
+                            Image(systemName: "brain.head.profile")
+                                .foregroundColor(.blue)
+                            Text("Model Eğitimi")
+                        }
+                    }
+                } header: {
+                    Text("Gelişmiş")
+                } footer: {
+                    Text("Kullanıcı düzeltmelerinden öğrenerek modeli iyileştirin.")
+                }
+                
+                // 5. Uygulama Ayarları
                 Section {
                     NavigationLink(destination: Text("KDV Ayarları (Yakında)")) {
                         HStack {
