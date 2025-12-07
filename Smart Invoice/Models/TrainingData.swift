@@ -20,6 +20,7 @@ struct TrainingData: Codable, Identifiable {
         if original.merchantTaxID != final.merchantTaxID { diffs.append("merchantTaxID") }
         if abs(original.totalAmount - final.totalAmount) > 0.01 { diffs.append("totalAmount") }
         if abs(original.taxAmount - final.taxAmount) > 0.01 { diffs.append("taxAmount") }
+        if abs(original.subTotal - final.subTotal) > 0.01 { diffs.append("subTotal") }
         if original.invoiceDate != final.invoiceDate { diffs.append("invoiceDate") }
         if original.invoiceNo != final.invoiceNo { diffs.append("invoiceNo") }
         if original.ettn != final.ettn { diffs.append("ettn") }

@@ -53,19 +53,23 @@ Sistem şu önerileri üretir:
 
 1. **Profil** sekmesine gidin
 2. **Model Eğitimi** bölümüne tıklayın
-3. **"Analiz Et"** butonuna basın
+3. Ekran açıldığında **otomatik olarak analiz başlar**
 4. Sonuçları inceleyin:
+   - Toplam örnek sayısı
    - Hata dağılımı grafiği
    - Pattern önerileri
    - Confidence ayarlamaları
+5. **Pull-to-refresh** ile manuel yenileme yapabilirsiniz
+6. **"Analiz Et"** butonu ile tekrar analiz yapabilirsiniz
 
 ### CSV Export
 
 Python backend ile model eğitimi için:
 
 1. **Model Eğitimi** ekranında **"CSV Olarak Dışa Aktar"** butonuna basın
-2. CSV dosyasını indirin
-3. Python script'inizde kullanın:
+2. CSV dosyası otomatik olarak oluşturulur ve geçici dizine kaydedilir
+3. **"Paylaş"** butonu ile dosyayı paylaşabilir veya indirebilirsiniz
+4. Python script'inizde kullanın:
 
 ```python
 import pandas as pd
@@ -100,9 +104,37 @@ struct TrainingData {
 invoice_id,field,original_value,corrected_value,diff_type,created_at
 abc123,merchantName,"Yanlış Firma","Doğru Firma",merchantName,2025-01-27
 abc123,totalAmount,100.0,150.0,totalAmount,2025-01-27
+abc123,taxAmount,18.0,20.0,taxAmount,2025-01-27
+abc123,subTotal,82.0,80.0,subTotal,2025-01-27
+abc123,merchantTaxID,"1234567890","9876543210",merchantTaxID,2025-01-27
+abc123,invoiceDate,2025-01-27,2025-01-28,invoiceDate,2025-01-27
+abc123,invoiceNo,"ABC2025001","ABC2025002",invoiceNo,2025-01-27
+abc123,ettn,"abc-def-ghi","xyz-uvw-rst",ettn,2025-01-27
 ```
 
+**Desteklenen Alanlar:**
+- `merchantName` - Satıcı adı
+- `merchantTaxID` - Satıcı vergi numarası
+- `totalAmount` - Toplam tutar
+- `taxAmount` - KDV tutarı
+- `subTotal` - Ara toplam (matrah)
+- `invoiceDate` - Fatura tarihi (yyyy-MM-dd formatında)
+- `invoiceNo` - Fatura numarası
+- `ettn` - ETTN numarası
+
 ## 🎯 İyileştirme Stratejileri
+
+### 0. Otomatik Önerileri İnceleme
+
+ModelTrainingView ekranında sistem otomatik olarak şu önerileri üretir:
+
+- **Pattern Önerileri:** Hangi regex pattern'lerinin iyileştirilebileceği
+- **Validasyon Önerileri:** 
+  - KDV tutarı matrahtan küçük olmalı (max %20)
+  - Ara toplam toplam tutardan küçük olmalı
+- **Confidence Ayarlamaları:** Hangi alanların confidence threshold'unu düşürmek gerektiği
+
+Bu önerileri inceleyip uygulayabilirsiniz.
 
 ### 1. Regex Pattern İyileştirmesi
 
@@ -125,12 +157,32 @@ static let flexible = "\\b\\d{1,3}(?:\\.\\d{3})*(?:[.,]\\d{1,2})?\\s*(?:TL|₺)?
 **Çözüm:** `RegexPatterns.Keywords` içine yeni kelimeler ekleyin:
 
 ```swift
+// Toplam tutar için (payableAmounts)
 static let payableAmounts = [
-    "ÖDENECEK", 
-    "GENEL TOPLAM",
+    "VERGİLER DAHİL TOPLAM TUTAR",
+    "VERGİLER DAHIL TOPLAM TUTAR",
+    "ÖDENECEK TUTAR",
+    "ÖDENECEK",
     "YENİ FORMAT TUTAR"  // Yeni eklenen
 ]
+
+// Ara toplam için (subTotalAmounts)
+static let subTotalAmounts = [
+    "MAL HİZMET TUTAR (KDV HARİÇ)",
+    "KDV MATRAHI",
+    "ARA TOPLAM",
+    "YENİ MATRAH KELİMESİ"  // Yeni eklenen
+]
+
+// KDV tutarı için (taxAmounts)
+static let taxAmounts = [
+    "HESAPLANAN KDV",
+    "TOPLAM KDV",
+    "YENİ KDV KELİMESİ"  // Yeni eklenen
+]
 ```
+
+**Not:** Anahtar kelime listeleri daraltılmıştır. Sadece %90+ doğruluk sağlayan kelimeler kullanılmaktadır.
 
 ### 3. Confidence Score Ayarlama
 
@@ -231,13 +283,46 @@ let prediction = try model.prediction(input: textFeatures)
 ## 📝 Notlar
 
 - Training data Firebase'de `training_data` koleksiyonunda saklanır
-- Her kullanıcı düzeltmesi otomatik olarak kaydedilir
+- Her kullanıcı düzeltmesi otomatik olarak kaydedilir (sadece yeni faturalar için, düzenlenen faturalar için değil)
 - Veriler anonimleştirilebilir (GDPR uyumluluğu için)
 - Model eğitimi opsiyoneldir - sistem olmadan da çalışır
+- **Önemli:** Sadece yeni fatura kaydedildiğinde training data oluşturulur. Mevcut faturaları düzenlemek training data oluşturmaz.
+
+## ✅ Yapmanız Gerekenler
+
+### Minimum Gereksinimler (Sistem Çalışması İçin)
+
+1. **Hiçbir şey yapmanıza gerek yok!** Sistem otomatik çalışır:
+   - Faturaları tarayın ve düzenleyin
+   - Kaydedin → Training data otomatik oluşur
+   - Profil → Model Eğitimi → Analiz sonuçlarını görün
+
+### İsteğe Bağlı İyileştirmeler
+
+1. **Pattern Önerilerini Uygulama:**
+   - ModelTrainingView'da pattern önerilerini inceleyin
+   - `RegexPatterns.swift` dosyasında önerilen pattern'leri uygulayın
+
+2. **Anahtar Kelime Ekleme:**
+   - Yeni fatura formatları için anahtar kelimeler ekleyin
+   - `RegexPatterns.Keywords` içine ekleyin
+
+3. **Python Backend ile Model Eğitimi (İleri Seviye):**
+   - CSV export yapın
+   - Python'da model eğitin
+   - Core ML model'e dönüştürün
+   - Xcode projesine ekleyin
+
+### Önerilen Çalışma Akışı
+
+1. **İlk 2-3 Hafta:** Sadece faturaları tarayın ve düzenleyin (veri toplama)
+2. **4. Hafta:** ModelTrainingView'da analiz yapın
+3. **5. Hafta:** Pattern önerilerini uygulayın
+4. **6+ Hafta:** Python backend ile gelişmiş model eğitimi (opsiyonel)
 
 ---
 
 **Son Güncelleme:** 2025-01-27  
-**Versiyon:** 1.0
+**Versiyon:** 1.1
 
 

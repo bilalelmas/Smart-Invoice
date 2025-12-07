@@ -8,6 +8,8 @@ struct ModelTrainingView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var csvExport: String?
+    @State private var csvFileURL: URL?
+    @State private var hasLoadedOnce = false
     
     var body: some View {
         NavigationStack {
@@ -29,13 +31,21 @@ struct ModelTrainingView: View {
                         // Export Butonu
                         exportSection
                     } else if let error = errorMessage {
-                        Text("Hata: \(error)")
-                            .foregroundColor(.red)
-                            .padding()
+                        VStack(spacing: 16) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 50))
+                                .foregroundColor(.orange)
+                            Text("Hata")
+                                .font(.headline)
+                            Text(error)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        .padding()
                     } else {
-                        Text("Analiz başlatılmadı")
-                            .foregroundColor(.secondary)
-                            .padding()
+                        emptyStateView
                     }
                 }
                 .padding()
@@ -49,7 +59,20 @@ struct ModelTrainingView: View {
                             await analyzeTrainingData()
                         }
                     }
+                    .disabled(isLoading)
                 }
+            }
+            .onAppear {
+                // İlk açılışta otomatik analiz başlat
+                if !hasLoadedOnce {
+                    hasLoadedOnce = true
+                    Task {
+                        await analyzeTrainingData()
+                    }
+                }
+            }
+            .refreshable {
+                await analyzeTrainingData()
             }
         }
     }
@@ -144,8 +167,8 @@ struct ModelTrainingView: View {
                 .cornerRadius(12)
             }
             
-            if let csv = csvExport {
-                ShareLink(item: csv, preview: SharePreview("Training Data CSV")) {
+            if let csv = csvExport, let url = csvFileURL {
+                ShareLink(item: url, preview: SharePreview("Training Data CSV", icon: "doc.text")) {
                     Label("Paylaş", systemImage: "square.and.arrow.up.on.square")
                         .font(.headline)
                         .foregroundColor(.white)
@@ -154,6 +177,10 @@ struct ModelTrainingView: View {
                         .background(Color.green)
                         .cornerRadius(12)
                 }
+            } else if csvExport != nil {
+                Text("CSV hazır, paylaşmak için yukarıdaki butona tıklayın")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .padding()
@@ -181,12 +208,67 @@ struct ModelTrainingView: View {
         errorMessage = nil
         
         do {
-            csvExport = try await service.exportTrainingDataToCSV()
+            let csv = try await service.exportTrainingDataToCSV()
+            csvExport = csv
+            
+            // CSV'yi geçici dosyaya kaydet
+            let tempDir = FileManager.default.temporaryDirectory
+            let fileName = "training_data_\(Date().timeIntervalSince1970).csv"
+            let fileURL = tempDir.appendingPathComponent(fileName)
+            
+            try csv.write(to: fileURL, atomically: true, encoding: .utf8)
+            csvFileURL = fileURL
+            
+            print("✅ CSV dosyası oluşturuldu: \(fileURL.path)")
         } catch {
             errorMessage = "Export hatası: \(error.localizedDescription)"
+            print("❌ CSV export hatası: \(error.localizedDescription)")
         }
         
         isLoading = false
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 60))
+                .foregroundColor(.blue.opacity(0.6))
+            
+            VStack(spacing: 8) {
+                Text("Model Eğitimi")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text("Henüz eğitim verisi yok")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                Text("Faturaları düzenleyip kaydettiğinizde, sistem otomatik olarak öğrenmeye başlayacak.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                    .padding(.top, 8)
+            }
+            
+            Button(action: {
+                Task {
+                    await analyzeTrainingData()
+                }
+            }) {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Analiz Et")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(Color.blue)
+                .cornerRadius(12)
+            }
+        }
+        .padding(40)
     }
 }
 

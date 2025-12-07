@@ -51,6 +51,18 @@ class ModelTrainingService {
                 patternSuggestions.append(contentsOf: suggestions)
             }
             
+            // Örnek: taxAmount için validasyon önerileri
+            if field == "taxAmount" {
+                let suggestions = analyzeTaxAmountPatterns(relevantData)
+                patternSuggestions.append(contentsOf: suggestions)
+            }
+            
+            // Örnek: subTotal için validasyon önerileri
+            if field == "subTotal" {
+                let suggestions = analyzeSubTotalPatterns(relevantData)
+                patternSuggestions.append(contentsOf: suggestions)
+            }
+            
             // Confidence score ayarlamaları
             // Eğer bir alan çok hata yapıyorsa, confidence threshold'unu düşür
             let errorRate = Double(errorCount) / Double(trainingData.count)
@@ -122,6 +134,54 @@ class ModelTrainingService {
         return suggestions
     }
     
+    /// KDV tutarı pattern'lerini analiz eder
+    private func analyzeTaxAmountPatterns(_ data: [TrainingData]) -> [PatternSuggestion] {
+        var suggestions: [PatternSuggestion] = []
+        
+        for trainingData in data {
+            let original = trainingData.originalOCR.taxAmount
+            let corrected = trainingData.userCorrected.taxAmount
+            let subTotal = trainingData.userCorrected.subTotal
+            
+            // Eğer KDV matrahtan büyükse, bu bir hata
+            if subTotal > 0 && original > subTotal {
+                suggestions.append(PatternSuggestion(
+                    field: "taxAmount",
+                    currentPattern: "N/A",
+                    suggestedPattern: "KDV tutarı matrahtan küçük olmalı (max %20)",
+                    reason: "KDV tutarı matrahtan büyük tespit edildi",
+                    confidence: 0.9
+                ))
+            }
+        }
+        
+        return suggestions
+    }
+    
+    /// Ara toplam pattern'lerini analiz eder
+    private func analyzeSubTotalPatterns(_ data: [TrainingData]) -> [PatternSuggestion] {
+        var suggestions: [PatternSuggestion] = []
+        
+        for trainingData in data {
+            let original = trainingData.originalOCR.subTotal
+            let corrected = trainingData.userCorrected.subTotal
+            let total = trainingData.userCorrected.totalAmount
+            
+            // Eğer ara toplam toplam tutardan büyükse, bu bir hata
+            if total > 0 && original > total {
+                suggestions.append(PatternSuggestion(
+                    field: "subTotal",
+                    currentPattern: "N/A",
+                    suggestedPattern: "Ara toplam toplam tutardan küçük olmalı",
+                    reason: "Ara toplam toplam tutardan büyük tespit edildi",
+                    confidence: 0.9
+                ))
+            }
+        }
+        
+        return suggestions
+    }
+    
     /// Training data'yı CSV formatında export eder (Python model eğitimi için)
     func exportTrainingDataToCSV() async throws -> String {
         let snapshot = try await db.collection("training_data")
@@ -154,6 +214,17 @@ class ModelTrainingService {
                 case "ettn":
                     originalValue = data.originalOCR.ettn
                     correctedValue = data.userCorrected.ettn
+                case "subTotal":
+                    originalValue = String(data.originalOCR.subTotal)
+                    correctedValue = String(data.userCorrected.subTotal)
+                case "merchantTaxID":
+                    originalValue = data.originalOCR.merchantTaxID
+                    correctedValue = data.userCorrected.merchantTaxID
+                case "invoiceDate":
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd"
+                    originalValue = formatter.string(from: data.originalOCR.invoiceDate)
+                    correctedValue = formatter.string(from: data.userCorrected.invoiceDate)
                 default:
                     continue
                 }

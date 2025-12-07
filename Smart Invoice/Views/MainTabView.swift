@@ -29,7 +29,7 @@ struct MainTabView: View {
                 case .analytics:
                     AnalyticsView(viewModel: viewModel)
                 case .profile:
-                    Text("Profil (Geliştiriliyor)")
+                    ProfileView(viewModel: viewModel)
                 case .test:
                     EvaluationView() // Yeni Test Ekranı
                 }
