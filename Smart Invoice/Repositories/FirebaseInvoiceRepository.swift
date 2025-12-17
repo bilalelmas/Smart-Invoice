@@ -47,7 +47,12 @@ class FirebaseInvoiceRepository: FirebaseInvoiceRepositoryProtocol {
             return nil
         }
         
-        return try? document.data(as: Invoice.self)
+        do {
+            return try document.data(as: Invoice.self)
+        } catch {
+            print("❌ Invoice decode hatası: \(error.localizedDescription)")
+            return nil
+        }
     }
 }
 

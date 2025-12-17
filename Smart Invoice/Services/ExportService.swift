@@ -2,11 +2,33 @@ import Foundation
 import UIKit
 import PDFKit
 
+/// Dışa aktarma/Raporlama işlemleri sırasında oluşabilecek hatalar.
+enum ExportError: LocalizedError {
+    case pdfGenerationFailed
+    case csvGenerationFailed
+    case fileWriteFailed(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .pdfGenerationFailed: return "PDF dosyası oluşturulamadı."
+        case .csvGenerationFailed: return "CSV verisi oluşturulamadı."
+        case .fileWriteFailed(let msg): return "Dosya diske yazılamadı: \(msg)"
+        }
+    }
+}
+
+/// Faturaları dışa aktarmak (PDF/CSV) için kullanılan servis.
+/// Tüm dışa aktarma işlemleri bu sınıf üzerinden yönetilir.
 class ExportService {
     static let shared = ExportService()
     
+    private init() {}
+    
     /// Faturaları Excel (CSV) formatına çevirir
-    func generateCSV(from invoices: [Invoice]) -> URL? {
+    /// - Parameter invoices: Dışa aktarılacak fatura listesi
+    /// - Returns: Oluşturulan geçici CSV dosyasının URL'i
+    /// - Throws: `ExportError` eğer dosya oluşturulamazsa
+    func generateCSV(from invoices: [Invoice]) throws -> URL {
         // CSV Başlıkları
         var csvString = "Tarih,Firma Adı,Fatura No,Vergi No,Tutar (TL),KDV (TL),Durum\n"
         
@@ -30,12 +52,15 @@ class ExportService {
             return path
         } catch {
             print("❌ CSV Hatası: \(error)")
-            return nil
+            throw ExportError.fileWriteFailed(error.localizedDescription)
         }
     }
     
     /// Faturaları PDF Tablosuna çevirir (Basit Çizim)
-    func generatePDF(from invoices: [Invoice]) -> URL? {
+    /// - Parameter invoices: Dışa aktarılacak fatura listesi
+    /// - Returns: Oluşturulan geçici PDF dosyasının URL'i
+    /// - Throws: `ExportError` eğer PDF oluşturulamazsa
+    func generatePDF(from invoices: [Invoice]) throws -> URL {
         let format = UIGraphicsPDFRendererFormat()
         let metaData = [kCGPDFContextTitle: "Fatura Raporu", kCGPDFContextAuthor: "Smart Invoice"]
         format.documentInfo = metaData as [String: Any]
@@ -45,7 +70,9 @@ class ExportService {
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect, format: format)
         
-        let data = renderer.pdfData { (context) in
+        var pdfData: Data?
+        
+        pdfData = renderer.pdfData { (context) in
             context.beginPage()
             
             // Başlık
@@ -90,6 +117,10 @@ class ExportService {
             drawText("GENEL TOPLAM: \(String(format: "%.2f ₺", total))", x: 400, y: y, isBold: true)
         }
         
+        guard let data = pdfData else {
+            throw ExportError.pdfGenerationFailed
+        }
+        
         let fileName = "Harcama_Raporu_\(Int(Date().timeIntervalSince1970)).pdf"
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         
@@ -98,15 +129,14 @@ class ExportService {
             return path
         } catch {
             print("❌ PDF Hatası: \(error)")
-            return nil
+            throw ExportError.fileWriteFailed(error.localizedDescription)
         }
     }
     
-    // Yardımcılar
+    // MARK: - Helpers
+    
     private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd.MM.yyyy"
-        return formatter.string(from: date)
+        return AppConstants.dateFormatter.string(from: date)
     }
     
     private func cleanCSV(_ text: String) -> String {

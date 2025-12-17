@@ -21,6 +21,10 @@ class InvoiceViewModel: ObservableObject {
     @Published var dateRange: ClosedRange<Date>? = nil
     @Published var amountRange: ClosedRange<Double>? = nil
     
+    // Raporlama
+    @Published var csvUrl: URL?
+    @Published var pdfUrl: URL?
+    
     // Servisler (Dependency Injection)
     private let ocrService: OCRServiceProtocol
     private let invoiceParser: InvoiceParserProtocol
@@ -55,7 +59,8 @@ class InvoiceViewModel: ObservableObject {
         self.isProcessing = false
     }
     
-    /// Görüntüden fatura okuma sürecini başlatır
+    /// Görüntüden fatura okuma sürecini başlatır.
+    /// - Parameter image: Taranacak fatura görüntüsü.
     @MainActor
     func scanInvoice(image: UIImage) async {
         self.isProcessing = true
@@ -68,7 +73,7 @@ class InvoiceViewModel: ObservableObject {
             
             // Parser'dan gelen veriyi taslak olarak ata
             // Sheet çakışmasını önlemek için kısa bir gecikme ekle
-            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 saniye
+            try await Task.sleep(nanoseconds: 200_000_000) // 0.2 saniye
             
             self.currentDraftInvoice = invoice
             self.originalOCRInvoice = invoice // Orijinal hali sakla (Active Learning için)
@@ -88,7 +93,8 @@ class InvoiceViewModel: ObservableObject {
         }
     }
     
-    /// Düzenlenmiş faturayı Firebase'e kaydeder
+    /// Düzenlenmiş faturayı Firebase'e kaydeder.
+    /// Yeni fatura ise ekler, mevcutsa günceller.
     @MainActor
     func saveInvoice() async {
         guard var invoice = currentDraftInvoice else { return }
@@ -152,8 +158,13 @@ class InvoiceViewModel: ObservableObject {
                             userCorrected: invoice,
                             diffs: diffs
                         )
-                        try? await repository.addTrainingData(trainingData)
-                        print("🧠 Eğitim verisi kaydedildi. Değişen alanlar: \(diffs)")
+                        do {
+                            try await repository.addTrainingData(trainingData)
+                            print("🧠 Eğitim verisi kaydedildi. Değişen alanlar: \(diffs)")
+                        } catch {
+                            print("⚠️ Eğitim verisi kaydedilemedi: \(error.localizedDescription)")
+                            // Ana akışı bozmamak için hatayı yutuyoruz ama logluyoruz
+                        }
                     }
                 }
                 
@@ -180,9 +191,31 @@ class InvoiceViewModel: ObservableObject {
         self.currentImage = nil // Kaydedilmiş faturalarda görsel yok
     }
     
+    // MARK: - Raporlama
+    
+    /// Faturalar için PDF ve CSV raporlarını oluşturur.
+    /// Sonuçlar `csvUrl` ve `pdfUrl` değişkenlerine atanır.
+    @MainActor
+    func generateReports() async {
+        let invoicesToExport = self.invoices
+        do {
+            // Background thread'de çalıştır
+            let (csv, pdf) = try await Task.detached(priority: .userInitiated) {
+                let csv = try await ExportService.shared.generateCSV(from: invoicesToExport)
+                let pdf = try await ExportService.shared.generatePDF(from: invoicesToExport)
+                return (csv, pdf)
+            }.value
+            
+            self.csvUrl = csv
+            self.pdfUrl = pdf
+        } catch {
+            self.errorMessage = "Rapor oluşturma hatası: \(error.localizedDescription)"
+        }
+    }
+    
     // MARK: - Filtreleme ve Arama
     
-    /// Filtrelenmiş fatura listesini döndürür
+    /// Mevcut filtrelere göre filtrelenmiş fatura listesini döndürür.
     var filteredInvoices: [Invoice] {
         var result = invoices
         

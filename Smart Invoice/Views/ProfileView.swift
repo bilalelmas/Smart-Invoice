@@ -2,8 +2,6 @@ import SwiftUI
 
 struct ProfileView: View {
     @ObservedObject var viewModel: InvoiceViewModel
-    @State private var csvUrl: URL?
-    @State private var pdfUrl: URL?
     
     // Şirket Bilgileri (Şimdilik sabit, ileride UserDefaults'tan çekilebilir)
     @State private var companyName = "Şirketim A.Ş."
@@ -58,7 +56,7 @@ struct ProfileView: View {
                 
                 // 3. Veri Yönetimi
                 Section {
-                    if let csvUrl = csvUrl {
+                    if let csvUrl = viewModel.csvUrl {
                         ShareLink(item: csvUrl) {
                             HStack {
                                 Image(systemName: "tablecells")
@@ -71,7 +69,7 @@ struct ProfileView: View {
                         ProgressView("Rapor Hazırlanıyor...")
                     }
                     
-                    if let pdfUrl = pdfUrl {
+                    if let pdfUrl = viewModel.pdfUrl {
                         ShareLink(item: pdfUrl) {
                             HStack {
                                 Image(systemName: "doc.richtext")
@@ -135,23 +133,14 @@ struct ProfileView: View {
             .navigationTitle("Profil")
             .background(Color(UIColor.systemGroupedBackground))
             .onAppear {
-                generateReports()
+                Task {
+                    await viewModel.generateReports()
+                }
             }
             .onChange(of: viewModel.invoices.count) {
-                generateReports()
-            }
-        }
-    }
-    
-    func generateReports() {
-        // Raporları arka planda oluştur
-        DispatchQueue.global(qos: .userInitiated).async {
-            let csv = ExportService.shared.generateCSV(from: viewModel.invoices)
-            let pdf = ExportService.shared.generatePDF(from: viewModel.invoices)
-            
-            DispatchQueue.main.async {
-                self.csvUrl = csv
-                self.pdfUrl = pdf
+                Task {
+                    await viewModel.generateReports()
+                }
             }
         }
     }

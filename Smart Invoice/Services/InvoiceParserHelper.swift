@@ -7,12 +7,20 @@ enum InvoiceParserHelper {
     
     // MARK: - Regex Helper Functions
     
-    /// Metinden regex pattern ile string çıkarır
+    /// Metinden regex pattern ile string çıkarır ve varsa Capture Group'u döndürür
     static func extractString(from text: String, pattern: String) -> String? {
         guard let regex = RegexPatterns.getRegex(pattern: pattern, options: .caseInsensitive) else { return nil }
         let res = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        if let m = res.first, let range = Range(m.range, in: text) {
-            return String(text[range])
+        
+        if let m = res.first {
+            // Eğer Capture Group varsa ($1), onu döndür
+            if m.numberOfRanges > 1, let range = Range(m.range(at: 1), in: text) {
+                return String(text[range])
+            }
+            // Yoksa tüm eşleşmeyi döndür ($0)
+            if let range = Range(m.range, in: text) {
+                return String(text[range])
+            }
         }
         return nil
     }
@@ -21,8 +29,13 @@ enum InvoiceParserHelper {
     static func extractLastMatch(from text: String, pattern: String) -> String? {
         guard let regex = RegexPatterns.getRegex(pattern: pattern) else { return nil }
         let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
-            return String(text[range])
+        if let lastMatch = results.last {
+            if lastMatch.numberOfRanges > 1, let range = Range(lastMatch.range(at: 1), in: text) {
+                return String(text[range])
+            }
+            if let range = Range(lastMatch.range, in: text) {
+                return String(text[range])
+            }
         }
         return nil
     }
@@ -31,12 +44,45 @@ enum InvoiceParserHelper {
     
     /// Tutar string'ini Double'a çevirir (normalize eder)
     static func normalizeAmount(_ amountStr: String) -> Double {
-        var s = amountStr.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
-        if s.contains(".") && s.contains(",") { 
-            s = s.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".") 
-        } else if s.contains(",") { 
-            s = s.replacingOccurrences(of: ",", with: ".") 
+        // 1. Temizleme (TL, TRY, semboller ve boşluklar)
+        let cleaned = amountStr
+            .replacingOccurrences(of: "TL", with: "")
+            .replacingOccurrences(of: "TRY", with: "")
+            .replacingOccurrences(of: "₺", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 2. Locale-based Parsing (TR)
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.numberStyle = .decimal
+        
+        if let number = formatter.number(from: cleaned) {
+            return number.doubleValue
         }
+        
+        // 3. Fallback: Manuel Temizleme
+        // Sadece rakam, nokta ve virgül bırak
+        var s = cleaned.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
+        
+        // 1.250,50 -> 1250.50
+        if s.contains(".") && s.contains(",") {
+            s = s.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
+        } else if s.contains(",") {
+            // 120,50 -> 120.50
+            s = s.replacingOccurrences(of: ",", with: ".")
+        }
+        // 1.250 -> 1250 (Eğer sadece nokta varsa ve kuruş değilse)
+        // Ama TR formatında nokta binliktir, yani silinmelidir.
+        // Ancak bazen nokta ondalık (US format) olabilir. Context önemli ama varsayılan TR.
+        else if s.contains(".") {
+            // Nokta sayısına bak (1.250.000 vs 12.50)
+            let parts = s.components(separatedBy: ".")
+            if parts.count > 2 || (parts.last?.count == 3) {
+                 // Muhtemelen binlik ayracı
+                 s = s.replacingOccurrences(of: ".", with: "")
+            }
+        }
+        
         return Double(s) ?? 0.0
     }
     
@@ -166,16 +212,23 @@ enum InvoiceParserHelper {
     
     // MARK: - Date Helper Functions
     
+    // Cache formatters to avoid expensive creation in loop
+    // Thread safety: Reading from static immutable array of DateFormatters is safe
+    private static let dateFormatters: [DateFormatter] = {
+        let formats = ["dd.MM.yyyy", "dd/MM/yyyy", "dd-MM-yyyy", "d.M.yyyy", "d/M/yyyy", "d-M-yyyy"]
+        return formats.map { fmt in
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "tr_TR")
+            f.timeZone = TimeZone.current
+            f.dateFormat = fmt
+            return f
+        }
+    }()
+    
     /// Tarih string'ini Date'e çevirir (gelecek tarih kontrolü ile)
     static func parseDateString(_ s: String) -> Date {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR") // Türkçe locale
-        f.timeZone = TimeZone.current
-        
-        // Tarih formatlarını dene
-        let formats = ["dd.MM.yyyy", "dd/MM/yyyy", "dd-MM-yyyy", "d.M.yyyy", "d/M/yyyy", "d-M-yyyy"]
-        for fmt in formats {
-            f.dateFormat = fmt
+        // Cached formatters kullan
+        for f in dateFormatters {
             if let d = f.date(from: s) {
                 // İyileştirme: Gelecek tarihleri kontrol et (muhtemelen OCR hatası)
                 let calendar = Calendar.current
@@ -206,6 +259,16 @@ enum InvoiceParserHelper {
         
         // Eğer hiçbiri çalışmazsa bugünün tarihini döndür (fallback)
         return Date()
+    }
+    
+    /// Metnin içinde tarih olup olmadığını kontrol eder
+    static func containsDate(_ text: String) -> Bool {
+        let datePattern = RegexPatterns.DateFormat.standard
+        if let regex = RegexPatterns.getRegex(pattern: datePattern) {
+            let range = NSRange(text.startIndex..., in: text)
+            return regex.firstMatch(in: text, range: range) != nil
+        }
+        return false
     }
     
     // MARK: - Validation Helper Functions

@@ -187,7 +187,7 @@ class OCRService: ObservableObject, OCRServiceProtocol {
             
             // Vision request options
             let options: [VNImageOption: Any] = [
-                .ciContext: CIContext() // Core Image context
+                .ciContext: AppConstants.ciContext // Shared Core Image context
             ]
             
             // Görüntü orientation'ını otomatik algıla
@@ -301,7 +301,8 @@ class OCRService: ObservableObject, OCRServiceProtocol {
         }
         
         // Core Image filters
-        let context = CIContext()
+        // Core Image filters
+        let context = AppConstants.ciContext
         
         // Hafif kontrast artırma (PDF görüntüleri için daha az agresif)
         guard let contrastFilter = CIFilter(name: "CIColorControls") else {
@@ -326,7 +327,8 @@ class OCRService: ObservableObject, OCRServiceProtocol {
         }
         
         // Core Image filters
-        let context = CIContext()
+        // Core Image filters
+        let context = AppConstants.ciContext
         var currentImage = ciImage
         
         // 1. Gürültü azaltma (galeri görselleri için önemli)

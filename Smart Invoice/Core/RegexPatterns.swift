@@ -29,24 +29,27 @@ struct RegexPatterns {
             }
             
             // Yeni regex oluştur
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            do {
+                let regex = try NSRegularExpression(pattern: pattern, options: options)
+                
+                // Cache size kontrolü
+                if regexCache.count >= maxCacheSize {
+                    // LRU: En eski kullanılmayanı sil
+                    if let oldestKey = cacheAccessOrder.first {
+                        regexCache.removeValue(forKey: oldestKey)
+                        cacheAccessOrder.removeFirst()
+                    }
+                }
+                
+                // Cache'e ekle
+                regexCache[cacheKey] = regex
+                cacheAccessOrder.append(cacheKey)
+                
+                return regex
+            } catch {
+                print("❌ Regex Hatası: \(error.localizedDescription) - Pattern: \(pattern)")
                 return nil
             }
-            
-            // Cache size kontrolü
-            if regexCache.count >= maxCacheSize {
-                // LRU: En eski kullanılmayanı sil
-                if let oldestKey = cacheAccessOrder.first {
-                    regexCache.removeValue(forKey: oldestKey)
-                    cacheAccessOrder.removeFirst()
-                }
-            }
-            
-            // Cache'e ekle
-            regexCache[cacheKey] = regex
-            cacheAccessOrder.append(cacheKey)
-            
-            return regex
         }
     }
     
@@ -71,9 +74,8 @@ struct RegexPatterns {
         static let standard = "[0-9]+[.,][0-9]{2}"
         
         /// İyileştirilmiş Esnek Para: Daha spesifik, yıl ve telefon numarası gibi false positive'leri önler
-        /// Örnek: 1.250,50 TL, 195 TL, 100,00
-        /// Word boundary kullanarak yıl (2024) gibi değerleri hariç tutar
-        static let flexible = "\\b\\d{1,3}(?:\\.\\d{3})*(?:[.,]\\d{1,2})?\\s*(?:TL|₺)?\\b"
+        /// Kullanıcının isteği: (\d{1,3}(?:\.\d{3})*(?:,\d{2})) - Nokta binlik, virgül kuruş
+        static let flexible = "(\\d{1,3}(?:\\.\\d{3})*(?:,\\d{2}))"
     }
     
     // MARK: - 2. Tarih Desenleri
@@ -86,7 +88,8 @@ struct RegexPatterns {
     // MARK: - 3. Kimlik Desenleri
     struct ID {
         /// VKN (Vergi Kimlik No): 10 hane
-        static let vkn = "\\b[0-9]{10}\\b"
+        /// Kullanıcının isteği: (?:VKN|VKN:)\s*(\d{10}) - Sadece 2. grup (rakamlar) alınacak
+        static let vkn = "(?:VKN|VERGİ\\s*NO|VERGI\\s*NO|VKN:)\\s*[:\\.]?\\s*(\\d{10})"
         
         /// TCKN (TC Kimlik No): 11 hane
         static let tckn = "\\b[0-9]{11}\\b"

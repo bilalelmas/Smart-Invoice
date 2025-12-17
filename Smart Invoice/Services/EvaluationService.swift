@@ -40,10 +40,19 @@ class EvaluationService: ObservableObject {
         self.results = []
         
         // 1. Golden Dataset'i Yükle
-        guard let url = Bundle.main.url(forResource: "GoldenDataset", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let records = try? JSONDecoder().decode([GoldenRecord].self, from: data) else {
-            print("❌ GoldenDataset.json bulunamadı veya okunamadı.")
+        // 1. Golden Dataset'i Yükle
+        guard let url = Bundle.main.url(forResource: "GoldenDataset", withExtension: "json") else {
+            print("❌ GoldenDataset.json bulunamadı.")
+            self.isRunning = false
+            return
+        }
+        
+        var records: [GoldenRecord] = []
+        do {
+            let data = try Data(contentsOf: url)
+            records = try JSONDecoder().decode([GoldenRecord].self, from: data)
+        } catch {
+            print("❌ GoldenDataset okunamadı: \(error.localizedDescription)")
             self.isRunning = false
             return
         }

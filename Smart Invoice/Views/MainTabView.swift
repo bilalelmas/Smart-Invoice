@@ -78,7 +78,7 @@ struct MainTabView: View {
             ScannerView(didFinishScanning: { result in
                 showScanner = false
                 Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
+                    do { try await Task.sleep(nanoseconds: 500_000_000) } catch {} // 0.5 saniye
                     if case .success(let images) = result, let img = images.first {
                         await viewModel.scanInvoice(image: img)
                     }
@@ -91,7 +91,7 @@ struct MainTabView: View {
                 .onDisappear {
                     if let img = selectedImage {
                         Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
+                            do { try await Task.sleep(nanoseconds: 500_000_000) } catch {} // 0.5 saniye
                             await viewModel.scanInvoice(image: img)
                             selectedImage = nil
                         }
@@ -108,7 +108,7 @@ struct MainTabView: View {
                 // Dosya işleme işlemini sheet kapandıktan sonra yap
                 Task { @MainActor in
                     // Sheet'in tamamen kapanması için bekle
-                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 saniye
+                    do { try await Task.sleep(nanoseconds: 500_000_000) } catch {} // 0.5 saniye
                     
                     // PDF dosyası kontrolü
                     if localUrl.pathExtension.lowercased() == "pdf" {
@@ -140,7 +140,15 @@ struct MainTabView: View {
                             }
                         }
                         
-                        if let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) {
+                        var img: UIImage?
+                        do {
+                            let data = try Data(contentsOf: localUrl)
+                            img = UIImage(data: data)
+                        } catch {
+                            print("❌ Resim verisi okunamadı: \(error.localizedDescription)")
+                        }
+                        
+                        if let img = img {
                             print("✅ Resim yüklendi, boyut: \(img.size)")
                             await viewModel.scanInvoice(image: img)
                         } else {

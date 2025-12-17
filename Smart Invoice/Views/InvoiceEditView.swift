@@ -88,7 +88,11 @@ struct InvoiceEditView: View {
         
         // Yeni task oluştur (2 saniye sonra)
         autoSaveTask = Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 saniye
+            do {
+                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 saniye
+            } catch {
+                return // Task iptal edildi
+            }
             
             if !Task.isCancelled {
                 await MainActor.run {
@@ -232,6 +236,13 @@ struct InvoiceEditView: View {
                                         invoice.totalAmount = parseAmount(newValue)
                                         triggerAutoSave()
                                     }
+                                
+                                // Güven Uyarısı
+                                if let confidence = invoice.confidenceScores["totalAmount"], confidence < 0.7 {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                        .help("Düşük Güven Skoru: Lütfen kontrol edin")
+                                }
                             }
                             
                             Divider()

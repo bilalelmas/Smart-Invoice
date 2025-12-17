@@ -5,6 +5,9 @@ import Foundation
 struct TrendyolProfile: VendorProfile {
     var vendorName: String = "Trendyol"
     
+    var vendorKeywords: [String] { ["DSM GRUP", "TRENDYOL", "BİLGİSAYAR SİSTEMLERİ", "DOLAP"] }
+    // Trendyol faturaları A4 olduğu için alt kısım geniştir, varsayılan footer logic yeterli.
+    
     func applies(to textLowercased: String) -> Bool {
         // Sadece "trendyol" kelimesi geçmesi yetmez, fatura başlığında veya mail adresinde arayalım.
         // Eski kod çok agresifti.
@@ -23,7 +26,7 @@ struct TrendyolProfile: VendorProfile {
         
         let pattern = "(?:SİPARİŞ|SIPARIS|ORDER)\\s*(?:NO|NUMARASI)?\\s*[:\\-]?\\s*([A-Z0-9\\-]{6,25})"
         
-        if let orderNo = InvoiceParser.shared.extractString(from: rawText, pattern: pattern) {
+        if let orderNo = InvoiceParserHelper.extractString(from: rawText, pattern: pattern) {
             // Eğer Fatura No bulunamadıysa veya boşsa, Sipariş No'yu yedek olarak kullanabiliriz
             // Veya Invoice modeline 'orderNumber' alanı ekleyip oraya yazabiliriz.
             if invoice.invoiceNo.isEmpty {

@@ -1,9 +1,17 @@
 import Foundation
+import CoreGraphics
 
 /// A101 faturalarına özel iş mantığı.
 /// Referans: Python projesi 'profile_a101.py'
 struct A101Profile: VendorProfile {
     var vendorName: String = "A101"
+    
+    var vendorKeywords: [String] { ["A101", "YENİ MAĞAZACILIK", "A-1O1"] }
+    
+    // A101 fişlerinde toplam genelde en alttadır
+    var amountCoordinates: CGRect? {
+        CGRect(x: 0.0, y: 0.6, width: 1.0, height: 0.4) // Alt %40'lık kısım
+    }
     
     func applies(to textLowercased: String) -> Bool {
         return textLowercased.contains("a101") ||
@@ -16,7 +24,7 @@ struct A101Profile: VendorProfile {
         // A101 faturaları bazen standart dışı olup 'A' ile başlayıp 15 hane sürebiliyor.
         // Python Regex: \bA\d{15}\b
         if invoice.invoiceNo.isEmpty {
-            if let customInvoiceNo = InvoiceParser.shared.extractString(from: rawText, pattern: "\\bA\\d{15}\\b") {
+            if let customInvoiceNo = InvoiceParserHelper.extractString(from: rawText, pattern: "\\bA\\d{15}\\b") {
                 invoice.invoiceNo = customInvoiceNo
             }
         }
@@ -26,8 +34,8 @@ struct A101Profile: VendorProfile {
         // Python Regex: (?:Ödenecek\s*Tutar|Genel\s*Toplam|Vergiler\s*Dahil\s*Toplam)...
         if invoice.totalAmount == 0.0 {
             let pattern = "(?:Ödenecek\\s*Tutar|Genel\\s*Toplam|Vergiler\\s*Dahil\\s*Toplam)\\s*[:\\-]?\\s*(\\d{1,3}(?:\\.\\d{3})*,\\d{2})"
-            if let amountStr = InvoiceParser.shared.extractString(from: rawText, pattern: pattern) {
-                invoice.totalAmount = InvoiceParser.shared.normalizeAmount(amountStr)
+            if let amountStr = InvoiceParserHelper.extractString(from: rawText, pattern: pattern) {
+                invoice.totalAmount = InvoiceParserHelper.normalizeAmount(amountStr)
             }
         }
         

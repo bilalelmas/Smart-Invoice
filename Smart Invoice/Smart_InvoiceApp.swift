@@ -19,7 +19,7 @@ struct SmartInvoiceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            // Uygulama açılınca DashboardView        WindowGroup {
+            // Uygulama açılınca DashboardView (MainTabView)
             MainTabView()
         }
     }

@@ -54,7 +54,12 @@ struct DocumentPicker: UIViewControllerRepresentable {
                 
                 // Eğer eski dosya varsa sil
                 if FileManager.default.fileExists(atPath: tempURL.path) {
-                    try? FileManager.default.removeItem(at: tempURL)
+                    do {
+                        try FileManager.default.removeItem(at: tempURL)
+                    } catch {
+                        print("⚠️ Eski dosya silinemedi: \(error.localizedDescription)")
+                        // Silinemese de kopyalamayı dene veya overwrite et
+                    }
                 }
                 
                 // Dosyayı kopyala

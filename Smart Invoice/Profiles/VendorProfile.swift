@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Satıcıya özel fatura işleme kurallarını tanımlayan protokol.
 /// Tez Notu: Burada 'Strategy Design Pattern' kullanılarak farklı satıcı formatları
@@ -16,4 +17,17 @@ protocol VendorProfile {
     ///   - invoice: Düzenlenecek fatura objesi (inout ile referans olarak gelir)
     ///   - rawText: Orijinal ham metin
     func applyRules(to invoice: inout Invoice, rawText: String)
+    
+    /// Satıcıya özgü anahtar kelimeler (Confidence artırmak için)
+    /// Örn: ["A101", "Yeni Mağazacılık"]
+    var vendorKeywords: [String] { get }
+    
+    /// Toplam tutarın genellikle bulunduğu bölge (Normalized 0-1)
+    /// Eğer tanımlıysa, FinancialStrategy buraya öncelik verir.
+    var amountCoordinates: CGRect? { get }
+}
+
+extension VendorProfile {
+    var vendorKeywords: [String] { [] }
+    var amountCoordinates: CGRect? { nil }
 }
