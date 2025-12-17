@@ -52,8 +52,8 @@ class InvoiceParser: InvoiceParserProtocol {
         
         var invoice = Invoice(userId: "")
         
-        // 1. Satırları Oluştur (Row Clustering)
-        let lines = groupBlocksIntoLines(blocks)
+        // 1. Satırları Oluştur (Gelişmiş Row Clustering)
+        let lines = SpatialEngine.clusterRows(blocks)
         let textLines = lines.map { $0.text }
         
         // Eğer blok yoksa (eski yöntem), rawText kullan
@@ -61,37 +61,57 @@ class InvoiceParser: InvoiceParserProtocol {
         let cleanLines = fullText.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            
-        // 2. Blok Ayrıştırma
-        let sellerBlock = extractSellerBlock(from: cleanLines)
         
-        // 3. Veri Çıkarımı
-        invoice.merchantName = extractMerchantName(from: sellerBlock)
-        invoice.merchantTaxID = extractMerchantTaxID(from: sellerBlock)
-        // Tarih çıkarımı: Önce bloklardan spatial bilgi kullan, yoksa cleanLines'dan
-        if !blocks.isEmpty {
-            invoice.invoiceDate = extractDateSpatial(blocks: blocks, lines: lines) ?? extractDate(from: cleanLines)
-        } else {
-            invoice.invoiceDate = extractDate(from: cleanLines)
-        }
-        invoice.ettn = extractETTN(from: cleanLines, rawText: fullText)
-        invoice.invoiceNo = extractInvoiceNumber(from: fullText)
+        // 2. Zoning System: Bölgelere ayır
+        let headerLeftBlocks = SpatialEngine.blocks(in: .headerLeft, from: blocks)
+        let headerRightBlocks = SpatialEngine.blocks(in: .headerRight, from: blocks)
+        let bodyLines = SpatialEngine.lines(in: .body, from: lines)
+        let footerLines = SpatialEngine.lines(in: .footer, from: lines)
+        
+        // 3. Zone-based Veri Çıkarımı
+        // Zone A (Header Left): Satıcı Bilgileri
+        invoice.merchantName = extractMerchantNameFromZone(blocks: headerLeftBlocks, lines: SpatialEngine.lines(in: .headerLeft, from: lines))
+        invoice.merchantTaxID = extractMerchantTaxIDFromZone(blocks: headerLeftBlocks)
+        
+        // Zone B (Header Right): Fatura No, Tarih, ETTN
+        let headerRightLines = SpatialEngine.lines(in: .headerRight, from: lines)
+        invoice.invoiceNo = extractInvoiceNumberFromZone(blocks: headerRightBlocks, lines: headerRightLines) ?? extractInvoiceNumber(from: fullText)
+        invoice.invoiceDate = extractDateFromZone(blocks: headerRightBlocks, lines: headerRightLines) ?? extractDate(from: cleanLines)
+        invoice.ettn = extractETTNFromZone(blocks: headerRightBlocks, lines: headerRightLines) ?? extractETTN(from: cleanLines, rawText: fullText)
         
         // 4. Finansal Veri ve Tablo Analizi
         if !blocks.isEmpty {
-            invoice.items = extractLineItemsSpatial(lines: lines)
-            invoice.totalAmount = extractTotalAmountSpatial(lines: lines)
-            // Önce subTotal'i bul, sonra taxAmount'u subTotal'e göre doğrula
-            invoice.subTotal = extractSubTotalSpatial(lines: lines, totalAmount: invoice.totalAmount)
-            invoice.taxAmount = extractTaxAmountSpatial(lines: lines, subTotal: invoice.subTotal)
+            // Zone C (Body): Ürünler/Tablo - Column Detection ile
+            invoice.items = extractLineItemsSpatialWithColumns(lines: bodyLines, allBlocks: blocks)
+            
+            // Zone D (Footer): Finansal Veriler
+            // KDV oranını tespit et
+            let footerText = footerLines.map { $0.text }.joined(separator: " ")
+            let taxRate = extractTaxRate(from: footerText)
+            invoice.totalAmount = extractTotalAmountFromZone(lines: footerLines)
+            invoice.subTotal = extractSubTotalFromZone(lines: footerLines, totalAmount: invoice.totalAmount, taxRate: taxRate)
+            invoice.taxAmount = extractTaxAmountFromZone(lines: footerLines, subTotal: invoice.subTotal, taxRate: taxRate)
         } else {
             invoice.items = extractLineItems(from: cleanLines)
+            // KDV oranını tespit et (text-based)
+            let taxRate = extractTaxRate(from: fullText)
             invoice.totalAmount = extractTotalAmount(from: fullText)
-            invoice.subTotal = extractSubTotal(from: fullText, totalAmount: invoice.totalAmount)
-            invoice.taxAmount = extractTaxAmount(from: fullText)
+            invoice.subTotal = extractSubTotal(from: fullText, totalAmount: invoice.totalAmount, taxRate: taxRate)
+            invoice.taxAmount = extractTaxAmount(from: fullText, taxRate: taxRate)
         }
         
-        // 4.5. Tutarları doğrula ve düzelt
+        // 4.5. Self-Healing: Matematiksel sağlama ile eksik verileri tamamla
+        var financialValidation = SpatialEngine.FinancialValidation(
+            totalAmount: invoice.totalAmount,
+            taxAmount: invoice.taxAmount,
+            subTotal: invoice.subTotal
+        )
+        financialValidation.heal()
+        invoice.totalAmount = financialValidation.totalAmount
+        invoice.taxAmount = financialValidation.taxAmount
+        invoice.subTotal = financialValidation.subTotal
+        
+        // 4.6. Ek validasyon (Self-healing sonrası)
         validateAndFixAmounts(&invoice)
         
         // 5. Profil Uygulama
@@ -204,153 +224,23 @@ class InvoiceParser: InvoiceParserProtocol {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
     
-    // MARK: - 📍 Konumsal Analiz Metodları
+    // MARK: - 📍 KDV Oranı Tespiti
     
-    /// Blokları Y koordinatlarına göre gruplayıp satır (TextLine) oluşturur.
-    /// Artık koordinatlar UIKit sisteminde (sol üst köşe), Y değeri yukarıdan aşağıya artar.
-    private func groupBlocksIntoLines(_ blocks: [TextBlock]) -> [TextLine] {
-        guard !blocks.isEmpty else { return [] }
-        
-        // Blokları Y konumuna göre sırala (yukarıdan aşağıya: küçükten büyüğe)
-        // UIKit koordinat sisteminde Y=0 en üst, Y=1 en alttır
-        let sortedBlocks = blocks.sorted { $0.y < $1.y }
-        
-        var lines: [TextLine] = []
-        var currentLineBlocks: [TextBlock] = []
-        
-        // Dinamik tolerans hesapla (blokların ortalama yüksekliğine göre)
-        let avgHeight = blocks.map { $0.height }.reduce(0, +) / CGFloat(blocks.count)
-        let tolerance = max(0.01, avgHeight * 0.3) // Yüksekliğin %30'u veya minimum 0.01
-        
-        for block in sortedBlocks {
-            if let lastBlock = currentLineBlocks.last {
-                // Y farkı tolerans içindeyse aynı satırdadır
-                if abs(block.midY - lastBlock.midY) < tolerance {
-                    currentLineBlocks.append(block)
-                } else {
-                    // Yeni satıra geç
-                    lines.append(TextLine(blocks: currentLineBlocks))
-                    currentLineBlocks = [block]
-                }
-            } else {
-                currentLineBlocks = [block]
-            }
-        }
-        
-        if !currentLineBlocks.isEmpty {
-            lines.append(TextLine(blocks: currentLineBlocks))
-        }
-        
-        return lines
+    /// KDV oranını tespit eder (%1, %8, %10, %18, %20) - Spatial ve text-based için ortak
+    private func extractTaxRate(from text: String) -> Double {
+        return InvoiceParserHelper.extractTaxRate(from: text)
     }
     
-    /// Konumsal Tablo Analizi (Sütun Bazlı)
-    private func extractLineItemsSpatial(lines: [TextLine]) -> [InvoiceItem] {
-        var items: [InvoiceItem] = []
-        
-        // 1. Tablo Başlığını Bul
-        guard let headerIndex = lines.firstIndex(where: { line in
-            RegexPatterns.Keywords.tableHeaders.contains(where: { line.text.uppercased().contains($0) })
-        }) else { return [] }
-        
-        // 2. Tablo Bitişini Bul
-        let footerIndex = lines.indices.first(where: { index in
-            index > headerIndex && RegexPatterns.Keywords.tableFooters.contains(where: { lines[index].text.uppercased().contains($0) })
-        }) ?? lines.count
-        
-        // 3. Satırları İşle
-        for i in (headerIndex + 1)..<footerIndex {
-            let line = lines[i]
-            
-            // Satırda en az 2 blok olmalı (Ürün Adı + Fiyat)
-            // Veya tek bloksa içinde fiyat olmalı
-            if line.blocks.isEmpty { continue }
-            
-            // Strateji: En sağdaki blok fiyat adayıdır.
-            // Vision blokları soldan sağa sıralı verir (TextLine init içinde sıraladık)
-            
-            if let lastBlock = line.blocks.last,
-               let amount = findAmountInString(lastBlock.text) {
-                
-                // Fiyat bulundu! Geri kalan bloklar ürün adıdır.
-                let nameBlocks = line.blocks.dropLast()
-                let name = nameBlocks.map { $0.text }.joined(separator: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                // Eğer isim boşsa (Sadece fiyat yazan satır), bir önceki satıra ait olabilir mi?
-                // Şimdilik sadece dolu isimleri alalım.
-                if !name.isEmpty {
-                    items.append(InvoiceItem(name: name, quantity: 1, unitPrice: amount, total: amount, taxRate: 18))
-                }
-            } else {
-                // Blok bazlı bulamadıysak, tüm satır metninde regex ara (Fallback)
-                if let amount = findAmountInString(line.text) {
-                    let name = line.text.replacingOccurrences(of: RegexPatterns.Amount.flexible, with: "", options: .regularExpression)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .replacingOccurrences(of: "TL", with: "")
-                    
-                    if !name.isEmpty {
-                        items.append(InvoiceItem(name: name, quantity: 1, unitPrice: amount, total: amount, taxRate: 18))
-                    }
-                }
-            }
-        }
-        
-        return items
-    }
-    
-    // MARK: - 📍 Konumsal Tutar Analizi
-    
-    private func extractTotalAmountSpatial(lines: [TextLine]) -> Double {
-        var candidates: [Double] = []
-        
-        // Alttan yukarı doğru tara (Genelde toplam en alttadır)
-        for (index, line) in lines.enumerated().reversed() {
-            let upper = line.text.uppercased()
-            
-            // Kara liste kontrolü
-            if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
-            
-            // Hedef kelime kontrolü (Ödenecek Tutar)
-            if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
-                // 1. Aynı satırda ara (En sağdaki değer)
-                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
-                    candidates.append(amount)
-                }
-                // Blok bazlı bulamazsa tüm satırda ara (tüm tutarları bul)
-                let amounts = findAllAmountsInString(line.text)
-                for amt in amounts {
-                    if amt > 0 {
-                        candidates.append(amt)
-                    }
-                }
-                
-                // 2. Bir alt satırda ara (Label üstte, değer altta ise)
-                if index + 1 < lines.count {
-                    let nextLine = lines[index + 1]
-                    // Alt satırda sayı varsa ve çok uzak değilse
-                    let nextAmounts = findAllAmountsInString(nextLine.text)
-                    for amt in nextAmounts {
-                        if amt > 0 {
-                            candidates.append(amt)
-                        }
-                    }
-                }
-            }
-        }
-        
-        // En büyük tutarı döndür (genelde toplam en büyüktür)
-        return candidates.max() ?? 0.0
-    }
-    
-    private func extractTaxAmountSpatial(lines: [TextLine], subTotal: Double = 0.0) -> Double {
+    private func extractTaxAmountSpatial(lines: [TextLine], subTotal: Double = 0.0, taxRate: Double = 0.18) -> Double {
         var candidates: [Double] = []
         
         for (index, line) in lines.enumerated().reversed() {
             let upper = line.text.uppercased()
             
             // KDV ile ilgili kelimeleri kontrol et
-            if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) {
+            // Ama "Ödenecek Tutar" gibi totalAmount kelimelerini atla
+            let isTotalAmountLine = RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) })
+            if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) && !isTotalAmountLine {
                 // 1. Aynı satırda ara (En sağdaki değer)
                 if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
                     candidates.append(amount)
@@ -376,22 +266,33 @@ class InvoiceParser: InvoiceParserProtocol {
             }
         }
         
-        // KDV tutarı matrahtan küçük olmalı (çünkü %20'ye kadar bir oran var)
+        // İyileştirme: KDV tutarı matrahtan küçük olmalı
+        // Ayrıca totalAmount ile karıştırılmamalı
         let maxCandidate = candidates.max() ?? 0.0
+        
         if subTotal > 0 {
-            let maxTaxRate = 0.20 // %20
-            let expectedMaxTax = subTotal * maxTaxRate
-            // Eğer bulunan KDV matrahtan büyükse, muhtemelen yanlış
-            if maxCandidate > expectedMaxTax {
-                // Matrahın %18'ini dene (en yaygın KDV oranı)
-                return subTotal * 0.18
+            let expectedMaxTax = subTotal * taxRate
+            // Eğer bulunan KDV matrahtan büyükse, muhtemelen yanlış (totalAmount ile karıştırılmış)
+            if maxCandidate > expectedMaxTax * 1.5 { // %50 tolerans
+                // Matrahın tespit edilen oranıyla hesapla
+                return subTotal * taxRate
             }
+            // Eğer bulunan KDV matrahtan büyükse ama çok büyük değilse, filtrele
+            if maxCandidate > subTotal {
+                // Bu kesinlikle yanlış, matrahın tespit edilen oranıyla hesapla
+                return subTotal * taxRate
+            }
+        }
+        
+        // Eğer hiçbir aday bulunamadıysa ve subTotal varsa, hesapla
+        if candidates.isEmpty && subTotal > 0 {
+            return subTotal * taxRate
         }
         
         return maxCandidate
     }
     
-    private func extractSubTotalSpatial(lines: [TextLine], totalAmount: Double) -> Double {
+    private func extractSubTotalSpatial(lines: [TextLine], totalAmount: Double, taxRate: Double = 0.18) -> Double {
         var candidates: [Double] = []
         var malHizmetCandidates: [Double] = []
         
@@ -462,9 +363,27 @@ class InvoiceParser: InvoiceParserProtocol {
             }
         }
         
+        // İyileştirme: Eğer hiçbir aday bulunamadıysa ve totalAmount varsa,
+        // totalAmount'tan KDV'yi çıkararak matrahı hesapla (varsayılan %18 KDV)
+        if candidates.isEmpty && totalAmount > 0 {
+            // totalAmount = subTotal + (subTotal * 0.18)
+            // totalAmount = subTotal * 1.18
+            // subTotal = totalAmount / 1.18
+            let estimatedSubTotal = totalAmount / 1.18
+            if estimatedSubTotal > 0 {
+                candidates.append(estimatedSubTotal)
+            }
+        }
+        
         // Matrah genelde toplam tutardan küçük ama KDV'den büyüktür
-        // En büyük adayı alalım
-        return candidates.max() ?? 0.0
+        // En büyük adayı alalım, ama totalAmount'tan küçük olmalı
+        let maxCandidate = candidates.max() ?? 0.0
+        if totalAmount > 0 && maxCandidate > totalAmount {
+            // Eğer bulunan değer totalAmount'tan büyükse, muhtemelen yanlış
+            // totalAmount'tan KDV'yi çıkararak hesapla
+            return totalAmount / 1.18
+        }
+        return maxCandidate
     }
     
     // MARK: - Logic with RegexPatterns
@@ -501,18 +420,37 @@ class InvoiceParser: InvoiceParserProtocol {
         return candidates.max() ?? 0.0
     }
     
-    internal func extractTaxAmount(from text: String) -> Double {
+    internal func extractTaxAmount(from text: String, taxRate: Double = 0.18) -> Double {
         let lines = text.components(separatedBy: .newlines)
+        var candidates: [Double] = []
+        
         for line in lines.reversed() {
             let upper = line.uppercased()
             if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) {
-                if let amount = findAmountInString(line) { return amount }
+                if let amount = findAmountInString(line) {
+                    candidates.append(amount)
+                }
+                // Tüm tutarları bul (birden fazla olabilir)
+                let amounts = findAllAmountsInString(line)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
+                }
             }
         }
-        return 0.0
+        
+        // En küçük değeri al (çünkü KDV genelde en küçük tutardır)
+        // Ama 0'dan büyük olmalı
+        let validCandidates = candidates.filter { $0 > 0 }
+        let minCandidate = validCandidates.min() ?? 0.0
+        
+        // Eğer hiçbir aday bulunamadıysa ve subTotal varsa, hesapla
+        // Ama burada subTotal yok, bu yüzden sadece bulunan değeri döndür
+        return minCandidate
     }
     
-    private func extractSubTotal(from text: String, totalAmount: Double) -> Double {
+    private func extractSubTotal(from text: String, totalAmount: Double, taxRate: Double = 0.18) -> Double {
         let lines = text.components(separatedBy: .newlines)
         var candidates: [Double] = []
         var malHizmetCandidates: [Double] = []
@@ -549,7 +487,26 @@ class InvoiceParser: InvoiceParserProtocol {
             }
         }
         
-        return candidates.max() ?? 0.0
+        // İyileştirme: Eğer hiçbir aday bulunamadıysa ve totalAmount varsa,
+        // totalAmount'tan KDV'yi çıkararak matrahı hesapla
+        if candidates.isEmpty && totalAmount > 0 {
+            // totalAmount = subTotal + (subTotal * taxRate)
+            // totalAmount = subTotal * (1 + taxRate)
+            // subTotal = totalAmount / (1 + taxRate)
+            let estimatedSubTotal = totalAmount / (1 + taxRate)
+            if estimatedSubTotal > 0 {
+                candidates.append(estimatedSubTotal)
+            }
+        }
+        
+        // Matrah genelde toplam tutardan küçük olmalı
+        let maxCandidate = candidates.max() ?? 0.0
+        if totalAmount > 0 && maxCandidate > totalAmount {
+            // Eğer bulunan değer totalAmount'tan büyükse, muhtemelen yanlış
+            // totalAmount'tan KDV'yi çıkararak hesapla
+            return totalAmount / (1 + taxRate)
+        }
+        return maxCandidate
     }
     
     /// Tutarları doğrula ve düzelt
@@ -558,13 +515,13 @@ class InvoiceParser: InvoiceParserProtocol {
     private func validateAndFixAmounts(_ invoice: inout Invoice) {
         // 1. KDV tutarının matrahtan küçük olduğunu kontrol et
         if invoice.subTotal > 0 && invoice.taxAmount > 0 {
-            // KDV tutarı matrahtan büyükse, muhtemelen yanlış
+            // KDV tutarı matrahtan büyükse, muhtemelen yanlış (totalAmount ile karıştırılmış)
             // KDV genelde matrahın %1-20'si arasındadır
             let maxTaxRate = 0.20 // %20
             let expectedMaxTax = invoice.subTotal * maxTaxRate
             
             if invoice.taxAmount > expectedMaxTax {
-                // KDV tutarı çok büyük, muhtemelen yanlış
+                // KDV tutarı çok büyük, muhtemelen yanlış (totalAmount ile karıştırılmış)
                 // Matrah ve KDV'yi yeniden hesapla
                 if invoice.totalAmount > 0 {
                     // totalAmount = subTotal + taxAmount
@@ -576,6 +533,9 @@ class InvoiceParser: InvoiceParserProtocol {
                         // Hala mantıksızsa, KDV'yi matrahtan hesapla (varsayılan %18)
                         invoice.taxAmount = invoice.subTotal * 0.18
                     }
+                } else {
+                    // TotalAmount yoksa, KDV'yi matrahtan hesapla
+                    invoice.taxAmount = invoice.subTotal * 0.18
                 }
             }
         }
@@ -606,43 +566,29 @@ class InvoiceParser: InvoiceParserProtocol {
         if invoice.taxAmount == 0 && invoice.totalAmount > 0 && invoice.subTotal > 0 {
             invoice.taxAmount = invoice.totalAmount - invoice.subTotal
         }
-    }
-    
-    private func findAmountInString(_ text: String) -> Double? {
-        // RegexPatterns.Amount.flexible kullanımı
-        if let match = extractString(from: text, pattern: RegexPatterns.Amount.flexible) {
-            // Yıl kontrolü (2024, 2025 karışmasın)
-            if match.count == 4 && (match.starts(with: "202")) { return nil }
-            return normalizeAmount(match)
-        }
-        return nil
-    }
-    
-    /// Bir string içindeki tüm tutarları bulur
-    private func findAllAmountsInString(_ text: String) -> [Double] {
-        var amounts: [Double] = []
         
-        guard let regex = RegexPatterns.getRegex(pattern: RegexPatterns.Amount.flexible) else {
-            return amounts
-        }
-        
-        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        
-        for match in matches {
-            if let range = Range(match.range, in: text) {
-                let matchString = String(text[range])
-                // Yıl kontrolü
-                if matchString.count == 4 && matchString.starts(with: "202") { continue }
-                
-                let amount = normalizeAmount(matchString)
-                if amount > 0 {
-                    amounts.append(amount)
-                }
+        // 5. İyileştirme: Eğer matrah 0 ise ama toplam varsa, matrahı hesapla
+        if invoice.subTotal == 0 && invoice.totalAmount > 0 {
+            // Varsayılan %18 KDV ile hesapla
+            // totalAmount = subTotal * 1.18
+            // subTotal = totalAmount / 1.18
+            invoice.subTotal = invoice.totalAmount / 1.18
+            if invoice.taxAmount == 0 {
+                invoice.taxAmount = invoice.totalAmount - invoice.subTotal
             }
         }
         
-        return amounts
+        // 6. İyileştirme: Eğer KDV matrahtan büyükse (totalAmount ile karıştırılmış), düzelt
+        if invoice.subTotal > 0 && invoice.taxAmount > invoice.subTotal {
+            // Bu kesinlikle yanlış, KDV'yi matrahtan hesapla
+            invoice.taxAmount = invoice.subTotal * 0.18
+            // TotalAmount'u da güncelle
+            if invoice.totalAmount == 0 {
+                invoice.totalAmount = invoice.subTotal + invoice.taxAmount
+            }
+        }
     }
+    
 
     private func extractMerchantTaxID(from sellerLines: [String]) -> String {
         // 1. Etiketli VKN Ara
@@ -669,53 +615,6 @@ class InvoiceParser: InvoiceParserProtocol {
         }
         
         return ""
-    }
-    
-    /// Konumsal analiz ile tarih çıkarımı (bloklardan)
-    private func extractDateSpatial(blocks: [TextBlock], lines: [TextLine]) -> Date? {
-        let datePattern = RegexPatterns.DateFormat.standard
-        
-        // 1. Önce etiketli satırlarda ara (FATURA TARİHİ, DÜZENLEME TARİHİ vb.)
-        for line in lines {
-            let upper = line.text.uppercased()
-            if RegexPatterns.Keywords.dateTargets.contains(where: { upper.contains($0) }) &&
-               !RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) {
-                // Aynı satırdaki bloklarda tarih ara
-                for block in line.blocks {
-                    if let dateStr = extractString(from: block.text, pattern: datePattern) {
-                        return parseDateString(dateStr)
-                    }
-                }
-                // Satır metninde ara
-                if let dateStr = extractString(from: line.text, pattern: datePattern) {
-                    return parseDateString(dateStr)
-                }
-            }
-        }
-        
-        // 2. Üst bölgede (ilk 20 satır) genel arama
-        let limit = min(lines.count, 20)
-        for i in 0..<limit {
-            let line = lines[i]
-            let upper = line.text.uppercased()
-            
-            // Kara listede varsa atla
-            if RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) { continue }
-            
-            // Satırdaki bloklarda ara
-            for block in line.blocks {
-                if let dateStr = extractString(from: block.text, pattern: datePattern) {
-                    return parseDateString(dateStr)
-                }
-            }
-            
-            // Satır metninde ara
-            if let dateStr = extractString(from: line.text, pattern: datePattern) {
-                return parseDateString(dateStr)
-            }
-        }
-        
-        return nil
     }
     
     private func extractDate(from lines: [String]) -> Date {
@@ -810,18 +709,45 @@ class InvoiceParser: InvoiceParserProtocol {
         return Array(lines.prefix(12))
     }
     
+    
     private func extractETTN(from lines: [String], rawText: String) -> String {
+        // 1. ETTN etiketli satırlarda ara
         for line in lines {
-            if line.uppercased().contains("ETTN") {
-                let words = line.components(separatedBy: .whitespaces)
-                if let lastWord = words.last, lastWord.count > 20 {
-                    return cleanETTN(lastWord)
+            let upper = line.uppercased()
+            if upper.contains("ETTN") {
+                // ETTN kelimesinden sonraki kısmı al
+                if let ettnIndex = upper.range(of: "ETTN") {
+                    let afterETTN = String(line[ettnIndex.upperBound...])
+                    let words = afterETTN.components(separatedBy: .whitespacesAndNewlines)
+                    for word in words {
+                        let cleaned = word.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .replacingOccurrences(of: ":", with: "")
+                            .replacingOccurrences(of: "-", with: "")
+                        // UUID formatı kontrolü (32 hex karakter)
+                        if cleaned.count >= 32 {
+                            // UUID formatına çevir
+                            let ettn = formatETTN(cleaned)
+                            if !ettn.isEmpty {
+                                return ettn
+                            }
+                        }
+                    }
                 }
             }
         }
+        
+        // 2. Regex ile genel arama (daha esnek pattern)
+        // ETTN formatı: 8-4-4-4-12 hex karakter
+        let flexibleETTNPattern = "[a-fA-F0-9]{8}[- ]?[a-fA-F0-9]{4}[- ]?[a-fA-F0-9]{4}[- ]?[a-fA-F0-9]{4}[- ]?[a-fA-F0-9]{12}"
+        if let raw = extractString(from: rawText, pattern: flexibleETTNPattern) {
+            return cleanETTN(raw)
+        }
+        
+        // 3. Standart UUID pattern
         if let raw = extractString(from: rawText, pattern: RegexPatterns.ID.ettn) {
             return cleanETTN(raw)
         }
+        
         return ""
     }
     
@@ -848,58 +774,46 @@ class InvoiceParser: InvoiceParserProtocol {
     
     // --- Helper Functions ---
     
+    // MARK: - Helper Function Delegates (InvoiceParserHelper'a yönlendir)
+    
     internal func extractLastMatch(from text: String, pattern: String) -> String? {
-        guard let regex = RegexPatterns.getRegex(pattern: pattern) else { return nil }
-        let results = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        if let lastMatch = results.last, let range = Range(lastMatch.range, in: text) {
-            return String(text[range])
-        }
-        return nil
+        return InvoiceParserHelper.extractLastMatch(from: text, pattern: pattern)
     }
     
     private func cleanETTN(_ text: String) -> String {
-        var t = text.replacingOccurrences(of: "ETTN", with: "").replacingOccurrences(of: ":", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        t = t.replacingOccurrences(of: "l", with: "1").replacingOccurrences(of: "O", with: "0")
-        return t.lowercased()
+        return InvoiceParserHelper.cleanETTN(text)
+    }
+    
+    private func formatETTN(_ text: String) -> String {
+        return InvoiceParserHelper.formatETTN(text)
     }
     
     private func isPhoneNumber(_ text: String) -> Bool {
-        let c = text.replacingOccurrences(of: " ", with: "")
-        return c.hasPrefix("+9") || c.hasPrefix("05") || c.contains("TEL")
+        return InvoiceParserHelper.isPhoneNumber(text)
     }
     
     private func parseDateString(_ s: String) -> Date {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "tr_TR") // Türkçe locale
-        f.timeZone = TimeZone.current
-        
-        // Tarih formatlarını dene
-        let formats = ["dd.MM.yyyy", "dd/MM/yyyy", "dd-MM-yyyy", "d.M.yyyy", "d/M/yyyy", "d-M-yyyy"]
-        for fmt in formats {
-            f.dateFormat = fmt
-            if let d = f.date(from: s) {
-                return d
-            }
-        }
-        
-        // Eğer hiçbiri çalışmazsa bugünün tarihini döndür (fallback)
-        return Date()
+        return InvoiceParserHelper.parseDateString(s)
     }
     
     internal func normalizeAmount(_ amountStr: String) -> Double {
-        var s = amountStr.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
-        if s.contains(".") && s.contains(",") { s = s.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".") }
-        else if s.contains(",") { s = s.replacingOccurrences(of: ",", with: ".") }
-        return Double(s) ?? 0.0
+        return InvoiceParserHelper.normalizeAmount(amountStr)
     }
     
     internal func extractString(from text: String, pattern: String) -> String? {
-        guard let regex = RegexPatterns.getRegex(pattern: pattern, options: .caseInsensitive) else { return nil }
-        let res = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        if let m = res.first, let range = Range(m.range, in: text) {
-            return String(text[range])
-        }
-        return nil
+        return InvoiceParserHelper.extractString(from: text, pattern: pattern)
+    }
+    
+    private func findAmountInString(_ text: String) -> Double? {
+        return InvoiceParserHelper.findAmountInString(text)
+    }
+    
+    private func findAllAmountsInString(_ text: String) -> [Double] {
+        return InvoiceParserHelper.findAllAmountsInString(text)
+    }
+    
+    private func extractETTNFromText(_ text: String) -> String {
+        return InvoiceParserHelper.extractETTNFromText(text)
     }
     
     private func calculateRealConfidence(invoice: Invoice) -> Float {
@@ -982,6 +896,349 @@ class InvoiceParser: InvoiceParserProtocol {
         }
         
         return min(score / totalWeight, 1.0)
+    }
+    
+    // MARK: - Zone-based Extraction Methods
+    
+    /// Zone A (Header Left): Satıcı adını çıkarır
+    private func extractMerchantNameFromZone(blocks: [TextBlock], lines: [TextLine]) -> String {
+        // Önce satırlarda ara (daha güvenilir)
+        for line in lines {
+            let upper = line.text.uppercased()
+            if RegexPatterns.Keywords.merchantBlacklist.contains(where: { upper.contains($0) }) { continue }
+            if isPhoneNumber(line.text) { continue }
+            
+            if RegexPatterns.Keywords.companySuffixes.contains(where: { upper.contains($0) }) {
+                return line.text
+            }
+        }
+        
+        // Fallback: Bloklarda ara
+        for block in blocks.sorted(by: { $0.y < $1.y }) {
+            let upper = block.text.uppercased()
+            if RegexPatterns.Keywords.merchantBlacklist.contains(where: { upper.contains($0) }) { continue }
+            if isPhoneNumber(block.text) { continue }
+            
+            if RegexPatterns.Keywords.companySuffixes.contains(where: { upper.contains($0) }) {
+                return block.text
+            }
+        }
+        
+        return ""
+    }
+    
+    /// Zone A (Header Left): Satıcı vergi numarasını çıkarır
+    private func extractMerchantTaxIDFromZone(blocks: [TextBlock]) -> String {
+        for block in blocks {
+            let upper = block.text.uppercased()
+            
+            // VKN etiketli satırlarda ara
+            if upper.contains("VKN") || upper.contains("VERGI") {
+                if let id = extractString(from: block.text, pattern: RegexPatterns.ID.vkn) {
+                    return id
+                }
+            }
+            
+            // Etiketsiz 10 hane ara (ama telefon numarası değil)
+            if !isPhoneNumber(block.text) {
+                if let id = extractString(from: block.text, pattern: RegexPatterns.ID.vkn) {
+                    return id
+                }
+            }
+        }
+        
+        return ""
+    }
+    
+    /// Zone B (Header Right): Fatura numarasını çıkarır
+    private func extractInvoiceNumberFromZone(blocks: [TextBlock], lines: [TextLine]) -> String? {
+        // Önce satırlarda ara
+        for line in lines {
+            let upper = line.text.uppercased()
+            if upper.contains("FATURA NO") || upper.contains("FATURA NUMARASI") {
+                // Standart format
+                if let num = extractString(from: line.text, pattern: RegexPatterns.InvoiceNo.standard) {
+                    return num
+                }
+                // A101 format
+                if let num = extractString(from: line.text, pattern: RegexPatterns.InvoiceNo.a101) {
+                    return num
+                }
+            }
+            
+            // Etiketsiz arama
+            if let num = extractString(from: line.text, pattern: RegexPatterns.InvoiceNo.standard) {
+                return num
+            }
+        }
+        
+        // Fallback: Bloklarda ara
+        for block in blocks {
+            if let num = extractString(from: block.text, pattern: RegexPatterns.InvoiceNo.standard) {
+                return num
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Zone B (Header Right): Tarihi çıkarır
+    private func extractDateFromZone(blocks: [TextBlock], lines: [TextLine]) -> Date? {
+        let datePattern = RegexPatterns.DateFormat.standard
+        
+        // Önce etiketli satırlarda ara
+        for line in lines {
+            let upper = line.text.uppercased()
+            if RegexPatterns.Keywords.dateTargets.contains(where: { upper.contains($0) }) &&
+               !RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) {
+                for block in line.blocks {
+                    if let dateStr = extractString(from: block.text, pattern: datePattern) {
+                        return parseDateString(dateStr)
+                    }
+                }
+                if let dateStr = extractString(from: line.text, pattern: datePattern) {
+                    return parseDateString(dateStr)
+                }
+            }
+        }
+        
+        // Genel arama (ilk 10 satır)
+        for line in lines.prefix(10) {
+            let upper = line.text.uppercased()
+            if RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) { continue }
+            
+            for block in line.blocks {
+                if let dateStr = extractString(from: block.text, pattern: datePattern) {
+                    return parseDateString(dateStr)
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Zone B (Header Right): ETTN'i çıkarır
+    private func extractETTNFromZone(blocks: [TextBlock], lines: [TextLine]) -> String? {
+        // Önce etiketli satırlarda ara
+        for line in lines {
+            let upper = line.text.uppercased()
+            if upper.contains("ETTN") {
+                if let ettnIndex = upper.range(of: "ETTN") {
+                    let afterETTN = String(line.text[ettnIndex.upperBound...])
+                    let ettn = extractETTNFromText(afterETTN)
+                    if !ettn.isEmpty {
+                        return ettn
+                    }
+                }
+            }
+        }
+        
+        // Genel arama
+        let allText = blocks.map { $0.text }.joined(separator: " ")
+        let ettn = extractETTNFromText(allText)
+        return ettn.isEmpty ? nil : ettn
+    }
+    
+    /// Zone D (Footer): Toplam tutarı çıkarır
+    private func extractTotalAmountFromZone(lines: [TextLine]) -> Double {
+        var candidates: [Double] = []
+        
+        // Alttan yukarı doğru tara (genelde toplam en alttadır)
+        for line in lines.reversed() {
+            let upper = line.text.uppercased()
+            
+            // Kara liste kontrolü
+            if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
+            // KDV kelimelerini atla (totalAmount ile karıştırmamak için)
+            if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) && 
+               !RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
+                continue
+            }
+            
+            // Hedef kelime kontrolü (Ödenecek Tutar)
+            if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
+                // En sağdaki blok fiyat adayıdır
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    candidates.append(amount)
+                }
+                // Tüm satırda ara
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
+                }
+            }
+        }
+        
+        return candidates.max() ?? 0.0
+    }
+    
+    /// Zone D (Footer): Ara toplamı çıkarır
+    private func extractSubTotalFromZone(lines: [TextLine], totalAmount: Double, taxRate: Double) -> Double {
+        var candidates: [Double] = []
+        
+        for line in lines.reversed() {
+            let upper = line.text.uppercased()
+            
+            // Ara Toplam / Matrah Kelimeleri
+            if RegexPatterns.Keywords.subTotalAmounts.contains(where: { upper.contains($0) }) {
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    candidates.append(amount)
+                }
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
+                }
+            }
+        }
+        
+        // Eğer hiçbir aday bulunamadıysa, totalAmount'tan hesapla
+        if candidates.isEmpty && totalAmount > 0 {
+            return totalAmount / (1 + taxRate)
+        }
+        
+        let maxCandidate = candidates.max() ?? 0.0
+        if totalAmount > 0 && maxCandidate > totalAmount {
+            return totalAmount / (1 + taxRate)
+        }
+        
+        return maxCandidate
+    }
+    
+    /// Zone D (Footer): KDV tutarını çıkarır
+    private func extractTaxAmountFromZone(lines: [TextLine], subTotal: Double, taxRate: Double) -> Double {
+        var candidates: [Double] = []
+        
+        for line in lines.reversed() {
+            let upper = line.text.uppercased()
+            
+            // KDV ile ilgili kelimeleri kontrol et
+            // Ama "Ödenecek Tutar" gibi totalAmount kelimelerini atla
+            let isTotalAmountLine = RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) })
+            if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) && !isTotalAmountLine {
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    candidates.append(amount)
+                }
+                let amounts = findAllAmountsInString(line.text)
+                for amt in amounts {
+                    if amt > 0 {
+                        candidates.append(amt)
+                    }
+                }
+            }
+        }
+        
+        let maxCandidate = candidates.max() ?? 0.0
+        
+        // Validasyon: KDV matrahtan küçük olmalı
+        if subTotal > 0 {
+            let expectedMaxTax = subTotal * taxRate * 1.5 // %50 tolerans
+            if maxCandidate > expectedMaxTax {
+                return subTotal * taxRate
+            }
+            if maxCandidate > subTotal {
+                return subTotal * taxRate
+            }
+        }
+        
+        // Eğer hiçbir aday bulunamadıysa, matrahtan hesapla
+        if candidates.isEmpty && subTotal > 0 {
+            return subTotal * taxRate
+        }
+        
+        return maxCandidate
+    }
+    
+    /// Zone C (Body): Column Detection ile ürünleri çıkarır
+    private func extractLineItemsSpatialWithColumns(lines: [TextLine], allBlocks: [TextBlock]) -> [InvoiceItem] {
+        var items: [InvoiceItem] = []
+        
+        // 1. Sütunları tespit et
+        let columns = SpatialEngine.detectColumns(in: lines)
+        print("📍 Tespit edilen sütun sayısı: \(columns.count)")
+        
+        // 2. Tablo başlığını bul
+        guard let headerIndex = lines.firstIndex(where: { line in
+            RegexPatterns.Keywords.tableHeaders.contains(where: { line.text.uppercased().contains($0) })
+        }) else {
+            // Tablo başlığı yoksa, sütun tespiti ile devam et
+            return extractItemsWithColumnDetection(lines: lines, columns: columns)
+        }
+        
+        // 3. Tablo bitişini bul
+        let footerIndex = lines.indices.first(where: { index in
+            index > headerIndex && RegexPatterns.Keywords.tableFooters.contains(where: { lines[index].text.uppercased().contains($0) })
+        }) ?? lines.count
+        
+        // 4. Satırları işle
+        for i in (headerIndex + 1)..<footerIndex {
+            let line = lines[i]
+            if line.blocks.isEmpty { continue }
+            
+            // Sütun tespiti varsa, sütunlara göre parse et
+            if !columns.isEmpty {
+                if let item = extractItemFromLineWithColumns(line: line, columns: columns) {
+                    items.append(item)
+                }
+            } else {
+                // Fallback: Eski yöntem (en sağdaki blok fiyat)
+                if let lastBlock = line.blocks.last, let amount = findAmountInString(lastBlock.text) {
+                    let nameBlocks = line.blocks.dropLast()
+                    let name = nameBlocks.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty {
+                        items.append(InvoiceItem(name: name, quantity: 1, unitPrice: amount, total: amount, taxRate: 18))
+                    }
+                }
+            }
+        }
+        
+        return items
+    }
+    
+    /// Sütun tespiti ile ürün çıkarımı (tablo başlığı yoksa)
+    private func extractItemsWithColumnDetection(lines: [TextLine], columns: [CGFloat]) -> [InvoiceItem] {
+        var items: [InvoiceItem] = []
+        
+        for line in lines {
+            if line.blocks.count < 2 { continue } // En az 2 blok olmalı
+            
+            // En sağdaki sütunda fiyat ara
+            if let lastBlock = line.blocks.last,
+               SpatialEngine.columnIndex(for: lastBlock, columns: columns) == columns.count - 1 {
+                if let amount = findAmountInString(lastBlock.text) {
+                    let nameBlocks = line.blocks.dropLast()
+                    let name = nameBlocks.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty {
+                        items.append(InvoiceItem(name: name, quantity: 1, unitPrice: amount, total: amount, taxRate: 18))
+                    }
+                }
+            }
+        }
+        
+        return items
+    }
+    
+    /// Bir satırdan sütun tespiti ile ürün çıkarır
+    private func extractItemFromLineWithColumns(line: TextLine, columns: [CGFloat]) -> InvoiceItem? {
+        guard line.blocks.count >= 2 else { return nil }
+        
+        // En sağdaki sütunda fiyat ara
+        if let lastBlock = line.blocks.last,
+           let columnIndex = SpatialEngine.columnIndex(for: lastBlock, columns: columns),
+           columnIndex == columns.count - 1 {
+            if let amount = findAmountInString(lastBlock.text) {
+                let nameBlocks = line.blocks.dropLast()
+                let name = nameBlocks.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    return InvoiceItem(name: name, quantity: 1, unitPrice: amount, total: amount, taxRate: 18)
+                }
+            }
+        }
+        
+        return nil
     }
 }
 

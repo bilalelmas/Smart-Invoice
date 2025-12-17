@@ -462,13 +462,28 @@ private func extractTaxRate(from line: TextLine) -> Int {
 **Dosya**: `InvoiceParser.swift`
 **Sorun**: Her çağrıda yeni regex oluşturuluyor
 **Etki**: Performans düşüklüğü, özellikle büyük metinlerde
+**Durum**: ✅ Düzeltildi - Regex cache eklendi
 
-### 6. Date Parsing Eksik
+### 6. CIContext Performans Sorunu
+**Dosya**: `OCRService.swift`
+**Sorun**: Her görüntü işleme işleminde yeni `CIContext()` oluşturuluyor (satır 188, 302, 327)
+**Etki**: Her görüntü işlemede ~10-50ms gereksiz yük, özellikle çoklu görüntü işlemede belirgin
+**Öneri**: Instance property olarak tek bir CIContext oluşturup tekrar kullanmak
+**Öncelik**: 🟡 Orta
+
+### 7. DateFormatter Performans Sorunu
+**Dosya**: `DashboardView.swift`, `InvoiceParser.swift`, `ModelTrainingService.swift`, `ExportService.swift`
+**Sorun**: Döngü içinde veya her çağrıda yeni `DateFormatter()` oluşturuluyor
+**Etki**: Her formatter oluşturmada ~1-5ms gereksiz yük, 100 fatura için ~100-500ms kayıp
+**Öneri**: Static/cached DateFormatter'lar kullanmak (format değişikliği gereken yerlerde cache)
+**Öncelik**: 🟡 Orta
+
+### 8. Date Parsing Eksik
 **Dosya**: `InvoiceParser.swift`
 **Sorun**: Sadece 3 format destekleniyor, diğer formatlar göz ardı ediliyor
 **Etki**: Bazı faturalarda tarih okunamıyor
 
-### 7. Empty State Handling
+### 9. Empty State Handling
 **Dosya**: `InvoiceParser.swift`
 **Sorun**: Boş bloklar için fallback yok
 **Etki**: OCR başarısız olursa uygulama çökebilir
@@ -485,9 +500,15 @@ private func extractTaxRate(from line: TextLine) -> Int {
 
 ### 2. Performans İyileştirmeleri
 
-- **Regex Cache**: Regex pattern'lerini cache'le
-- **Lazy Loading**: Büyük görseller için lazy loading
-- **Background Processing**: OCR işlemlerini background queue'da çalıştır
+- **Regex Cache**: Regex pattern'lerini cache'le ✅ Tamamlandı
+- **Lazy Loading**: Büyük görseller için lazy loading ✅ Tamamlandı
+- **Background Processing**: OCR işlemlerini background queue'da çalıştır ✅ Tamamlandı
+- **CIContext Optimizasyonu**: Her görüntü işlemede yeni context oluşturma yerine instance property olarak tek context kullanımı
+  - **Beklenen Kazanç**: Her görüntü işlemede ~10-50ms tasarruf
+  - **Uygulama**: `OCRService` sınıfında `private let ciContext: CIContext` instance property
+- **DateFormatter Optimizasyonu**: Döngü içinde veya her çağrıda yeni formatter oluşturma yerine static/cached formatter'lar
+  - **Beklenen Kazanç**: Her formatter oluşturmada ~1-5ms tasarruf, 100 fatura için ~100-500ms
+  - **Uygulama**: Static property olarak formatter'ları cache'le, format değişikliği gereken yerlerde format cache kullan
 
 ### 3. Güvenlik
 
@@ -526,10 +547,12 @@ private func extractTaxRate(from line: TextLine) -> Int {
 
 ### 🟡 Orta Öncelik (Yakın Zamanda)
 
-1. Async/await migration
-2. Dependency injection
+1. Async/await migration ✅ Tamamlandı
+2. Dependency injection ✅ Tamamlandı
 3. Unit test coverage
 4. Performance optimizasyonları
+   - CIContext optimizasyonu (instance property)
+   - DateFormatter optimizasyonu (static/cached)
 
 ### 🟢 Düşük Öncelik (Gelecek İyileştirmeler)
 

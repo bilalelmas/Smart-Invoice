@@ -90,7 +90,8 @@ class ModelTrainingService {
             let corrected = trainingData.userCorrected.totalAmount
             
             // Eğer tutar tamamen yanlışsa (örn: 100 yerine 1000)
-            if abs(original - corrected) > original * 0.5 {
+            let difference = abs(original - corrected)
+            if difference > original * 0.5 {
                 // Yeni pattern önerisi: Daha sıkı regex kontrolü
                 let currentPattern = RegexPatterns.Amount.flexible
                 let suggestedPattern = "\\b\\d{1,3}(?:\\.\\d{3})*(?:[.,]\\d{1,2})?\\s*(?:TL|₺)?\\b(?<!202[0-9])" // Yıl kontrolü eklenmiş
@@ -140,7 +141,6 @@ class ModelTrainingService {
         
         for trainingData in data {
             let original = trainingData.originalOCR.taxAmount
-            let corrected = trainingData.userCorrected.taxAmount
             let subTotal = trainingData.userCorrected.subTotal
             
             // Eğer KDV matrahtan büyükse, bu bir hata
@@ -164,7 +164,6 @@ class ModelTrainingService {
         
         for trainingData in data {
             let original = trainingData.originalOCR.subTotal
-            let corrected = trainingData.userCorrected.subTotal
             let total = trainingData.userCorrected.totalAmount
             
             // Eğer ara toplam toplam tutardan büyükse, bu bir hata

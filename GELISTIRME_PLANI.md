@@ -105,11 +105,15 @@
 - [x] Regex cache optimizasyonu (LRU strategy ile)
 - [x] Lazy loading (büyük fatura listeleri için pagination)
 - [x] Background processing iyileştirmeleri
+- [ ] CIContext optimizasyonu (instance property olarak tek context kullanımı)
+- [ ] DateFormatter optimizasyonu (static/cached formatter'lar)
 
 **Faydalar**:
 - Daha hızlı OCR işlemi
 - Daha az bellek kullanımı
 - Daha iyi kullanıcı deneyimi
+- CIContext tekrar kullanımı ile %10-50ms tasarruf (her görüntü işlemede)
+- DateFormatter cache ile %1-5ms tasarruf (her formatter oluşturmada)
 
 ---
 
@@ -400,9 +404,14 @@
 ## 📊 Öncelik Matrisi
 
 ### 🔴 Yüksek Öncelik (Hemen Başla)
-1. Async/Await Migration
+1. Async/Await Migration ✅ Tamamlandı
 2. Unit Test Coverage
 3. Performance Optimizasyonları
+   - ✅ Image preprocessing
+   - ✅ Regex cache
+   - ✅ Lazy loading
+   - [ ] CIContext optimizasyonu
+   - [ ] DateFormatter optimizasyonu
 
 ### 🟡 Orta Öncelik (Yakın Zamanda)
 1. Dependency Injection
@@ -490,6 +499,26 @@
 ---
 
 **Son Güncelleme**: 2025-01-27  
-**Plan Versiyonu**: 1.1  
+**Plan Versiyonu**: 1.2  
 **Durum**: Aktif Geliştirme
+
+## 🔄 Son Eklenen İyileştirmeler (v1.2)
+
+### Performans Optimizasyonları - Yeni Tespitler
+
+**CIContext Optimizasyonu:**
+- **Sorun**: `OCRService.swift` içinde her görüntü işleme işleminde yeni `CIContext()` oluşturuluyor (3 yerde)
+- **Etki**: Her görüntü işlemede ~10-50ms gereksiz yük
+- **Çözüm**: Instance property olarak tek bir CIContext oluşturup tekrar kullanmak
+- **Beklenen Kazanç**: Özellikle çoklu görüntü işlemede belirgin performans artışı
+
+**DateFormatter Optimizasyonu:**
+- **Sorun**: Döngü içinde veya her çağrıda yeni `DateFormatter()` oluşturuluyor
+  - `DashboardView.swift`: Dictionary grouping içinde her invoice için
+  - `InvoiceParser.swift`: `parseDateString()` içinde her çağrıda
+  - `ModelTrainingService.swift`: CSV export içinde döngü içinde
+  - `ExportService.swift`: `formatDate()` içinde her çağrıda
+- **Etki**: Her formatter oluşturmada ~1-5ms gereksiz yük, 100 fatura için ~100-500ms
+- **Çözüm**: Static/cached DateFormatter'lar kullanmak (format değişikliği gereken yerlerde format cache)
+- **Beklenen Kazanç**: Özellikle çok sayıda fatura işlenirken belirgin performans artışı
 

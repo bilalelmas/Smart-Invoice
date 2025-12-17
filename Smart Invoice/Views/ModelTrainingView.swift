@@ -167,7 +167,7 @@ struct ModelTrainingView: View {
                 .cornerRadius(12)
             }
             
-            if let csv = csvExport, let url = csvFileURL {
+            if csvExport != nil, let url = csvFileURL {
                 ShareLink(item: url, preview: SharePreview("Training Data CSV", icon: "doc.text")) {
                     Label("Paylaş", systemImage: "square.and.arrow.up.on.square")
                         .font(.headline)

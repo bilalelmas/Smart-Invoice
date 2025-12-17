@@ -637,8 +637,7 @@ struct AnalyticsView: View {
         let calendar = Calendar.current
         let now = Date()
         
-        guard let currentPeriodStart = calendar.date(byAdding: .month, value: selectedTimeRange == .thisMonth ? 0 : -1, to: now),
-              let previousPeriodStart = calendar.date(byAdding: .month, value: selectedTimeRange == .thisMonth ? -1 : -2, to: now),
+        guard let previousPeriodStart = calendar.date(byAdding: .month, value: selectedTimeRange == .thisMonth ? -1 : -2, to: now),
               let previousPeriodEnd = calendar.date(byAdding: .month, value: selectedTimeRange == .thisMonth ? 0 : -1, to: now) else {
             return nil
         }

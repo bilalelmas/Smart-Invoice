@@ -178,10 +178,12 @@ class OCRService: ObservableObject, OCRServiceProtocol {
                 }
             }
             
-            // Türkçe ve İngilizce dil desteği (Python projesindeki 'tur' ve 'eng' ayarı gibi)
-            request.recognitionLanguages = ["tr-TR", "en-US"]
-            request.recognitionLevel = .accurate // Hız yerine doğruluk odaklı (Tez için önemli)
-            request.usesLanguageCorrection = true // Dil düzeltmesi açık
+            // Maksimum doğruluk için Vision Framework ayarları
+            request.recognitionLanguages = ["tr-TR", "en-US"] // Türkçe ve İngilizce dil desteği
+            request.recognitionLevel = .accurate // En yüksek doğruluk seviyesi (hız yerine doğruluk)
+            request.usesLanguageCorrection = true // Dil düzeltmesi aktif
+            request.minimumTextHeight = 0.0 // Minimum metin yüksekliği (0 = otomatik, tüm metinleri yakala)
+            // Not: customWords özelliği Vision Framework'te mevcut değil, bu yüzden eklenmedi
             
             // Vision request options
             let options: [VNImageOption: Any] = [
