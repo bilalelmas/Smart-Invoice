@@ -70,7 +70,7 @@ class ItemsStrategy: InvoiceExtractionStrategy {
             // En sağdaki sütunda fiyat ara
             if let lastBlock = line.blocks.last,
                SpatialEngine.columnIndex(for: lastBlock, columns: columns) == columns.count - 1 {
-                if let amount = InvoiceParserHelper.findAmountInString(lastBlock.text) {
+                if let amount = InvoiceParserHelper.extractAmount(from: lastBlock.text) {
                     let nameBlocks = line.blocks.dropLast()
                     let name = nameBlocks.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                     if !name.isEmpty {
@@ -89,7 +89,7 @@ class ItemsStrategy: InvoiceExtractionStrategy {
         if let lastBlock = line.blocks.last,
            let columnIndex = SpatialEngine.columnIndex(for: lastBlock, columns: columns),
            columnIndex == columns.count - 1 {
-            if let amount = InvoiceParserHelper.findAmountInString(lastBlock.text) {
+            if let amount = InvoiceParserHelper.extractAmount(from: lastBlock.text) {
                 let nameBlocks = line.blocks.dropLast()
                 let name = nameBlocks.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !name.isEmpty {
@@ -115,10 +115,7 @@ class ItemsStrategy: InvoiceExtractionStrategy {
         for line in lines[(headerIndex + 1)..<footerIndex] {
             if line.count < 5 { continue }
             
-            if let amountMatch = InvoiceParserHelper.extractLastMatch(from: line, pattern: RegexPatterns.Amount.flexible) {
-                if amountMatch.count == 4 && amountMatch.starts(with: "202") { continue }
-                
-                let amount = InvoiceParserHelper.normalizeAmount(amountMatch)
+            if let amount = InvoiceParserHelper.extractAmount(from: line) {
                 let name = line.replacingOccurrences(of: RegexPatterns.Amount.flexible, with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .replacingOccurrences(of: "TL", with: "")

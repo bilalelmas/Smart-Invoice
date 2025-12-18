@@ -22,29 +22,19 @@ class InvoiceDetailsStrategy: InvoiceExtractionStrategy {
     // MARK: - Private Methods
     
     private func extractInvoiceNumber(blocks: [TextBlock], lines: [TextLine]) -> String? {
-        // Önce satırlarda ara
+        // 1. Önce satırlarda etiketli arama
         for line in lines {
             let upper = line.text.uppercased()
             if upper.contains("FATURA NO") || upper.contains("FATURA NUMARASI") {
-                // Standart format
-                if let num = InvoiceParserHelper.extractString(from: line.text, pattern: RegexPatterns.InvoiceNo.standard) {
+                if let num = InvoiceParserHelper.extractInvoiceNo(from: line.text) {
                     return num
                 }
-                // A101 format
-                if let num = InvoiceParserHelper.extractString(from: line.text, pattern: RegexPatterns.InvoiceNo.a101) {
-                    return num
-                }
-            }
-            
-            // Etiketsiz arama
-            if let num = InvoiceParserHelper.extractString(from: line.text, pattern: RegexPatterns.InvoiceNo.standard) {
-                return num
             }
         }
         
-        // Fallback: Bloklarda ara
+        // 2. Etiketsiz genel arama (Tüm Header bloğunda)
         for block in blocks {
-            if let num = InvoiceParserHelper.extractString(from: block.text, pattern: RegexPatterns.InvoiceNo.standard) {
+            if let num = InvoiceParserHelper.extractInvoiceNo(from: block.text) {
                 return num
             }
         }
@@ -53,26 +43,24 @@ class InvoiceDetailsStrategy: InvoiceExtractionStrategy {
     }
     
     private func extractInvoiceNumberFallback(from text: String) -> String {
-        // Genel Tarama (eski yöntemden)
-        if let num = InvoiceParserHelper.extractString(from: text, pattern: RegexPatterns.InvoiceNo.standard) { return num }
-        return ""
+        return InvoiceParserHelper.extractInvoiceNo(from: text) ?? ""
     }
     
+
+    
     private func extractDate(blocks: [TextBlock], lines: [TextLine]) -> Date? {
-        let datePattern = RegexPatterns.DateFormat.standard
-        
         // Önce etiketli satırlarda ara
         for line in lines {
             let upper = line.text.uppercased()
             if RegexPatterns.Keywords.dateTargets.contains(where: { upper.contains($0) }) &&
                !RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) {
                 for block in line.blocks {
-                    if let dateStr = InvoiceParserHelper.extractString(from: block.text, pattern: datePattern) {
-                        return InvoiceParserHelper.parseDateString(dateStr)
+                    if let date = InvoiceParserHelper.extractDate(from: block.text) {
+                        return date
                     }
                 }
-                if let dateStr = InvoiceParserHelper.extractString(from: line.text, pattern: datePattern) {
-                    return InvoiceParserHelper.parseDateString(dateStr)
+                if let date = InvoiceParserHelper.extractDate(from: line.text) {
+                    return date
                 }
             }
         }
@@ -83,8 +71,8 @@ class InvoiceDetailsStrategy: InvoiceExtractionStrategy {
             if RegexPatterns.Keywords.dateBlacklist.contains(where: { upper.contains($0) }) { continue }
             
             for block in line.blocks {
-                if let dateStr = InvoiceParserHelper.extractString(from: block.text, pattern: datePattern) {
-                    return InvoiceParserHelper.parseDateString(dateStr)
+                if let date = InvoiceParserHelper.extractDate(from: block.text) {
+                    return date
                 }
             }
         }
@@ -93,14 +81,13 @@ class InvoiceDetailsStrategy: InvoiceExtractionStrategy {
     }
     
     private func extractDateFallback(from cleanLines: [String]) -> Date {
-        // Genel Arama (Header bölgesinde)
         let limit = min(cleanLines.count, 20)
         for i in 0..<limit {
             let line = cleanLines[i]
             if RegexPatterns.Keywords.dateBlacklist.contains(where: { line.uppercased().contains($0) }) { continue }
             
-            if let d = InvoiceParserHelper.extractString(from: line, pattern: RegexPatterns.DateFormat.standard) {
-                return InvoiceParserHelper.parseDateString(d)
+            if let date = InvoiceParserHelper.extractDate(from: line) {
+                return date
             }
         }
         return Date()
@@ -113,7 +100,7 @@ class InvoiceDetailsStrategy: InvoiceExtractionStrategy {
             if upper.contains("ETTN") {
                 if let ettnIndex = upper.range(of: "ETTN") {
                     let afterETTN = String(line.text[ettnIndex.upperBound...])
-                    let ettn = InvoiceParserHelper.extractETTNFromText(afterETTN)
+                    let ettn = InvoiceParserHelper.extractETTN(from: afterETTN)
                     if !ettn.isEmpty {
                         return ettn
                     }
@@ -123,11 +110,11 @@ class InvoiceDetailsStrategy: InvoiceExtractionStrategy {
         
         // Genel arama
         let allText = blocks.map { $0.text }.joined(separator: " ")
-        let ettn = InvoiceParserHelper.extractETTNFromText(allText)
+        let ettn = InvoiceParserHelper.extractETTN(from: allText)
         return ettn.isEmpty ? nil : ettn
     }
     
     private func extractETTNFallback(from rawText: String) -> String {
-        return InvoiceParserHelper.extractETTNFromText(rawText)
+        return InvoiceParserHelper.extractETTN(from: rawText)
     }
 }

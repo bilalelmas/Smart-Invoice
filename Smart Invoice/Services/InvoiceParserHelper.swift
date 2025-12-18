@@ -5,6 +5,86 @@ import CoreGraphics
 /// Regex, tarih, tutar ve ETTN işlemleri için utility fonksiyonları içerir
 enum InvoiceParserHelper {
     
+    // MARK: - High-Level Field Extractors
+    // Bu bölüm, stratejilerden ve profillerden görünen, alan-bazlı (field-based) API yüzeyidir.
+    // İçeride mümkün olduğunca mevcut low-level helper fonksiyonlarını kullanır.
+    
+    /// Verilen metin içindeki ilk anlamlı tutarı döndürür.
+    /// İş kuralı: `findAmountInString(_:)` ile aynı davranışı sarar.
+    static func extractAmount(from text: String) -> Double? {
+        return findAmountInString(text)
+    }
+    
+    /// Verilen metin içindeki tüm anlamlı tutarları döndürür.
+    /// İş kuralı: `findAllAmountsInString(_:)` ile aynı davranışı sarar.
+    static func extractAllAmounts(from text: String) -> [Double] {
+        return findAllAmountsInString(text)
+    }
+    
+    /// Verilen metin içindeki ilk geçerli tarihi döndürür.
+    /// 1. Regex ile tarih deseni aranır.
+    /// 2. Bulunursa `parseDateString(_:)` ile Date'e çevrilir.
+    /// 3. Hiç tarih bulunamazsa `nil` döner (fallback tarih üretmez).
+    static func extractDate(from text: String) -> Date? {
+        // Önce metinde tarih deseni var mı kontrol et (erken çıkış için)
+        guard containsDate(text) else { return nil }
+        
+        if let dateString = extractString(from: text, pattern: RegexPatterns.DateFormat.standard) {
+            return parseDateString(dateString)
+        }
+        
+        return nil
+    }
+    
+    /// Verilen metinden ETTN bilgisini çıkarır.
+    /// İş kuralı: `extractETTNFromText(_:)` ile aynı davranışı sarar.
+    static func extractETTN(from text: String) -> String {
+        return extractETTNFromText(text)
+    }
+    
+    /// Verilen metinden fatura numarasını çıkarır.
+    /// Öncelik politikası:
+    /// 1. A101 özel formatı
+    /// 2. Pazaryeri formatları (Trendyol vb.)
+    /// 3. Standart e-Arşiv formatı
+    /// 4. Kısa/legacy format
+    static func extractInvoiceNo(from text: String) -> String? {
+        let patterns = [
+            RegexPatterns.InvoiceNo.a101,
+            RegexPatterns.InvoiceNo.marketplace,
+            RegexPatterns.InvoiceNo.standard,
+            RegexPatterns.InvoiceNo.short
+        ]
+        
+        for pattern in patterns {
+            if let invoiceNo = extractString(from: text, pattern: pattern) {
+                return invoiceNo
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Verilen metinden VKN (Vergi Kimlik Numarası) çıkarır.
+    /// `RegexPatterns.ID.vkn` pattern'ini kullanır.
+    static func extractVKN(from text: String) -> String? {
+        return extractString(from: text, pattern: RegexPatterns.ID.vkn)
+    }
+    
+    /// Verilen metinden TCKN (TC Kimlik Numarası) çıkarır.
+    /// `RegexPatterns.ID.tckn` pattern'ini kullanır.
+    static func extractTCKN(from text: String) -> String? {
+        // Metin doğrudan telefon numarası gibi görünüyorsa erken çık
+        if isPhoneNumber(text) { return nil }
+        return extractString(from: text, pattern: RegexPatterns.ID.tckn)
+    }
+    
+    /// Verilen metinden KDV oranını tespit eder.
+    /// İş kuralı: `extractTaxRate(from:)` fonksiyonunu dışa açan semantik bir isimdir.
+    static func detectTaxRate(from text: String) -> Double {
+        return extractTaxRate(from: text)
+    }
+    
     // MARK: - Regex Helper Functions
     
     /// Metinden regex pattern ile string çıkarır ve varsa Capture Group'u döndürür
@@ -40,50 +120,18 @@ enum InvoiceParserHelper {
         return nil
     }
     
-    // MARK: - Amount Helper Functions
-    
     /// Tutar string'ini Double'a çevirir (normalize eder)
+    /// Kullanıcının isteği üzerine basitleştirilmiş mantık:
+    /// 1. Rakam ve Virgül dışındaki her şeyi sil (Noktalar binlik ayracı varsayılır ve silinir)
+    /// 2. Virgülü noktaya çevir (Double dönüşümü için)
     static func normalizeAmount(_ amountStr: String) -> Double {
-        // 1. Temizleme (TL, TRY, semboller ve boşluklar)
-        let cleaned = amountStr
-            .replacingOccurrences(of: "TL", with: "")
-            .replacingOccurrences(of: "TRY", with: "")
-            .replacingOccurrences(of: "₺", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // "809,96 TL" -> "[^0-9,]" regex ile -> "809,96"
+        let cleaned = amountStr.replacingOccurrences(of: "[^0-9,]", with: "", options: .regularExpression)
         
-        // 2. Locale-based Parsing (TR)
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
-        formatter.numberStyle = .decimal
+        // "809,96" -> "809.96"
+        let formatted = cleaned.replacingOccurrences(of: ",", with: ".")
         
-        if let number = formatter.number(from: cleaned) {
-            return number.doubleValue
-        }
-        
-        // 3. Fallback: Manuel Temizleme
-        // Sadece rakam, nokta ve virgül bırak
-        var s = cleaned.replacingOccurrences(of: "[^0-9.,]", with: "", options: .regularExpression)
-        
-        // 1.250,50 -> 1250.50
-        if s.contains(".") && s.contains(",") {
-            s = s.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
-        } else if s.contains(",") {
-            // 120,50 -> 120.50
-            s = s.replacingOccurrences(of: ",", with: ".")
-        }
-        // 1.250 -> 1250 (Eğer sadece nokta varsa ve kuruş değilse)
-        // Ama TR formatında nokta binliktir, yani silinmelidir.
-        // Ancak bazen nokta ondalık (US format) olabilir. Context önemli ama varsayılan TR.
-        else if s.contains(".") {
-            // Nokta sayısına bak (1.250.000 vs 12.50)
-            let parts = s.components(separatedBy: ".")
-            if parts.count > 2 || (parts.last?.count == 3) {
-                 // Muhtemelen binlik ayracı
-                 s = s.replacingOccurrences(of: ".", with: "")
-            }
-        }
-        
-        return Double(s) ?? 0.0
+        return Double(formatted) ?? 0.0
     }
     
     /// String içinde tutar bulur (yıl kontrolü ile)

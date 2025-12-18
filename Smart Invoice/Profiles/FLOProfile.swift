@@ -9,7 +9,7 @@ struct FLOProfile: VendorProfile {
                textLowercased.contains("polaris")
     }
     
-    func applyRules(to invoice: inout Invoice, rawText: String) {
+    func applyRules(to invoice: inout Invoice, rawText: String, blocks: [TextBlock]) {
         // FLO faturalarında satıcı adı bazen çok uzun çıkıyor, kısaltalım.
         invoice.merchantName = "FLO Mağazacılık A.Ş."
         

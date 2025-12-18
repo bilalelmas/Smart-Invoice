@@ -12,14 +12,16 @@ class VendorStrategy: InvoiceExtractionStrategy {
         
         let fullTextUpper = context.fullText.uppercased()
         
+        // Varsayılan tip
+        invoice.metadata["vendor_type"] = "Generic_E-Arsiv"
+        
         // --- Öncelik 1: Bilinen VKN ile Doğrudan Tespit ---
         // DSM Grup VKN: 3130557669 -> Trendyol
         if fullTextUpper.contains("3130557669") {
             invoice.merchantName = "Trendyol (DSM Grup)"
             invoice.merchantTaxID = "3130557669"
-            print("✅ VendorStrategy: VKN ile Trendyol tespit edildi.")
-            
-            // Eğer profil zaten Trendyol ise ismini ezmeyebiliriz ama garanti olsun
+            invoice.metadata["vendor_type"] = "Trendyol_Direct" // Classification
+            print("✅ VendorStrategy: VKN ile Trendyol (Direct) tespit edildi.")
             return
         }
         
@@ -39,6 +41,7 @@ class VendorStrategy: InvoiceExtractionStrategy {
         if fullTextUpper.contains("PAZARYERİ: TRENDYOL") || fullTextUpper.contains("ÖDEME ARACISI: TRENDYOL") {
             print("ℹ️ VendorStrategy: Trendyol Pazaryeri faturası.")
             invoice.metadata["source"] = "Trendyol_Marketplace"
+            // Marketplace olsa bile Generic_E-Arsiv olarak kalabilir veya özel tip atanabilir
         }
     }
     
@@ -79,20 +82,18 @@ class VendorStrategy: InvoiceExtractionStrategy {
     
     /// Zone A (Header Left): Satıcı vergi numarasını çıkarır
     private func extractMerchantTaxID(blocks: [TextBlock], fullText: String) -> String {
-        // Önce belirli etiketlerle ara
-        let vknPattern = "(?:VKN|VERGİ\\s*NO|VERGI\\s*NO)\\s*[:\\.]?\\s*(\\d{10})"
-        if let id = InvoiceParserHelper.extractString(from: fullText, pattern: vknPattern) {
+        // Önce tam metin üzerinde etiketli VKN ara
+        if let id = InvoiceParserHelper.extractVKN(from: fullText) {
             return id
         }
         
-        // Bloklarda 10-11 haneli sayı ara
+        // Bloklarda VKN / TCKN ara (telefon numaralarını hariç tut)
         for block in blocks {
             if !InvoiceParserHelper.isPhoneNumber(block.text) {
-                 if let id = InvoiceParserHelper.extractString(from: block.text, pattern: "\\b\\d{10}\\b") {
-                     return id
-                 }
-                // TCKN (11 hane)
-                if let id = InvoiceParserHelper.extractString(from: block.text, pattern: "\\b\\d{11}\\b") {
+                if let id = InvoiceParserHelper.extractVKN(from: block.text) {
+                    return id
+                }
+                if let id = InvoiceParserHelper.extractTCKN(from: block.text) {
                     return id
                 }
             }

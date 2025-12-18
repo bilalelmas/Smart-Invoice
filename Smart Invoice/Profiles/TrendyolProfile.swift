@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Trendyol faturalarına özel iş mantığı.
 /// Referans: Python projesi 'profile_trendyol.py'
@@ -20,39 +21,46 @@ struct TrendyolProfile: VendorProfile {
         return isTrendyolVendor
     }
     
-    func applyRules(to invoice: inout Invoice, rawText: String) {
-        // Trendyol faturalarında bazen "Sipariş No" fatura no yerine geçebilir veya ekstra bilgi olabilir.
-        // Python kodundaki Regex: (?:SİPARİŞ|SIPARIS|ORDER)\s*(?:NO|NUMARASI)?\s*[:\-]?\s*([A-Z0-9\-]{6,25})
-        
-        let pattern = "(?:SİPARİŞ|SIPARIS|ORDER)\\s*(?:NO|NUMARASI)?\\s*[:\\-]?\\s*([A-Z0-9\\-]{6,25})"
-        
-        if let orderNo = InvoiceParserHelper.extractString(from: rawText, pattern: pattern) {
-            // Eğer Fatura No bulunamadıysa veya boşsa, Sipariş No'yu yedek olarak kullanabiliriz
-            // Veya Invoice modeline 'orderNumber' alanı ekleyip oraya yazabiliriz.
-            if invoice.invoiceNo.isEmpty {
-                invoice.invoiceNo = orderNo
+    func applyRules(to invoice: inout Invoice, rawText: String, blocks: [TextBlock]) {
+        // 1. Satıcı Tipi Belirleme (Metadata)
+        if rawText.contains("3130557669") {
+            invoice.merchantName = "Trendyol (DSM Grup)"
+            invoice.metadata["vendor_type"] = "Trendyol_Direct"
+            
+            // Trendyol Direct Faturası ise özel etiketleri ara
+            if let amount = InvoiceParserHelper.extractAmount(from: rawText) {
+                 invoice.totalAmount = amount
+            }
+        } else {
+            // Trendyol Pazaryeri ise (Mavi, Junglee vb.)
+            invoice.metadata["vendor_type"] = "Trendyol_Marketplace"
+            
+            // Standart e-arşiv etiketlerini ara
+            if let amount = InvoiceParserHelper.extractAmount(from: rawText) {
+                invoice.totalAmount = amount
             }
         }
         
-        // Trendyol pazaryeri faturalarında satıcı tespiti:
-        // extractMerchantName zaten sol üst bloğun ilk satırını buluyor
-        // Eğer bu satır "DSM Grup" içermiyorsa, bu gerçek satıcıdır (pazaryeri üzerinden satış yapan)
-        // Eğer "DSM Grup" içeriyorsa, bu Trendyol'un kendi faturasıdır
-        
-        let currentName = invoice.merchantName.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Eğer satıcı adı DSM Grup içermiyorsa, bu gerçek satıcıdır - olduğu gibi bırak
-        if !currentName.contains("DSM GRUP") && !currentName.contains("TRENDYOL") {
-            // Gerçek satıcı bulundu, değişiklik yapma
-            return
+        // 2. ETTN Ayıklama (Her iki tipte de standarttır)
+        let ettn = InvoiceParserHelper.extractETTN(from: rawText)
+        if !ettn.isEmpty {
+            invoice.ettn = ettn
         }
         
-        // Eğer DSM Grup ise, bu Trendyol'un kendi faturası
-        // Pazaryeri olduğunu belirt (isteğe bağlı, kullanıcı deneyimi için)
-        if currentName.contains("DSM GRUP") {
-            // Trendyol'un kendi faturası - mevcut ismi koru
-            // İsterseniz "(Pazaryeri)" ekleyebilirsiniz ama genelde gerek yok
-            // Çünkü zaten Trendyol profili aktif olduğu için pazaryeri olduğu anlaşılıyor
+        // 3. Spatial Logic (Apple Vision) - Sağ Alt Çeyrek Analizi
+        if !blocks.isEmpty {
+            let candidates = blocks.filter { block in
+                // Sağ alt çeyrek: x > 0.6 ve y > 0.7
+                return block.frame.minX > 0.6 && block.frame.minY > 0.7
+            }.compactMap { block -> Double? in
+                return InvoiceParserHelper.extractAmount(from: block.text)
+            }
+            
+            // En sonuncusunu 'Toplam Tutar' olarak seç
+            if let spatialTotal = candidates.last, spatialTotal > 0 {
+                invoice.totalAmount = spatialTotal
+                print("🎯 TrendyolProfile: Spatial Logic ile tutar güncellendi: \(spatialTotal)")
+            }
         }
     }
 }

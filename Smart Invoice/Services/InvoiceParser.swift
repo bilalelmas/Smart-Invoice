@@ -95,7 +95,7 @@ class InvoiceParser: InvoiceParserProtocol {
             
             // 4. Profil Kurallarını Uygula (Post-Processing)
             if let profile = detectedProfile {
-                profile.applyRules(to: &invoice, rawText: fullText)
+                profile.applyRules(to: &invoice, rawText: fullText, blocks: blocks)
             }
             
             // 4. Debug Bölgelerini Hesapla (Faz 3)

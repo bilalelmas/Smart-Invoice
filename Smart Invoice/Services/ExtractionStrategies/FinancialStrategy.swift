@@ -19,7 +19,7 @@ class FinancialStrategy: InvoiceExtractionStrategy {
             if !priorityBlocks.isEmpty {
                 // Öncelikli bölgede tutar ara
                 let priorityText = priorityBlocks.map { $0.text }.joined(separator: "\n")
-                let amounts = InvoiceParserHelper.findAllAmountsInString(priorityText)
+                let amounts = InvoiceParserHelper.extractAllAmounts(from: priorityText)
                 if let maxAmount = amounts.max(), maxAmount > 0 {
                     print("🎯 Spatial Priority ile Tutar Bulundu: \(maxAmount) (Profil: \(profile.vendorName))")
                     invoice.totalAmount = maxAmount
@@ -43,7 +43,8 @@ class FinancialStrategy: InvoiceExtractionStrategy {
                 let footerText = footerLines.map { $0.text }.joined(separator: " ")
                 let taxRate = extractTaxRate(from: footerText)
                 
-                invoice.totalAmount = extractTotalAmountFromZone(lines: footerLines)
+                let vendorType = invoice.metadata["vendor_type"] ?? "Generic_E-Arsiv"
+                invoice.totalAmount = extractTotalAmountFromZone(lines: footerLines, vendorType: vendorType)
                 
                 if invoice.totalAmount > 0 {
                     // Güven Skoru Hesaplama
@@ -115,58 +116,79 @@ class FinancialStrategy: InvoiceExtractionStrategy {
     // MARK: - Private Methods (Advanced Extraction)
     
     private func extractTaxRate(from text: String) -> Double {
-        return InvoiceParserHelper.extractTaxRate(from: text)
+        return InvoiceParserHelper.detectTaxRate(from: text)
     }
     
     /// Gelişmiş Tutar Çıkarma Mantığı (Anchor + Spatial Lookahead + Heuristic)
-    private func extractTotalAmountFromZone(lines: [TextLine]) -> Double {
-        var candidates: [Double] = []
-        let anchors = ["ÖDENECEK TUTAR", "VERGİLER DAHİL TOPLAM", "GENEL TOPLAM", "TOPLAM TUTAR"]
+    private func extractTotalAmountFromZone(lines: [TextLine], vendorType: String) -> Double {
+        
+        // --- 1. Trendyol Direct (Özel Logic) ---
+        if vendorType == "Trendyol_Direct" {
+            // Y > 0.7 (Sayfanın alt kısmı)
+            let bottomLines = lines.filter { $0.frame.minY > 0.7 }
+            
+            for line in bottomLines {
+                let upper = line.text.uppercased()
+                
+                // İstenmeyen kelimeleri ele
+                if upper.contains("TOPLAM BİRİM FİYAT") { continue }
+                
+                // Hedef: "Vergiler Dahil Toplam Tutar"
+                if upper.contains("VERGİLER DAHİL TOPLAM") {
+                     // Bounding box'ın sağındaki değeri al (Basitçe satırdaki son değer)
+                     let amounts = InvoiceParserHelper.extractAllAmounts(from: line.text)
+                     if let rightMost = amounts.last, rightMost > 0 {
+                         return rightMost
+                     }
+                }
+            }
+            // Bulunamazsa Generic metoda düşebilir veya 0 dönebilir
+            // Fallback olarak Generic logic'i çalıştıralım:
+        }
+        
+        // --- 2. Generic E-Arşiv (Bottom-up Logic) ---
+        // İstenen Mantık: 'Ödenecek Tutar' veya 'Vergiler Dahil Toplam Tutar' görünce DUR ve en sağdakini al.
+        let strictAnchors = ["ÖDENECEK TUTAR", "VERGİLER DAHİL TOPLAM", "GENEL TOPLAM", "TOPLAM TUTAR"]
         
         for line in lines.reversed() {
             let upper = line.text.uppercased()
             
-            // 1. Anchor (Çapa) Kelime Kontrolü
-            if anchors.contains(where: { upper.contains($0) }) {
-                // Konumsal Filtre: Metnin sağında veya altında sayı ara
-                // Önce satırın kendisinde sayı var mı?
-                if let amount = InvoiceParserHelper.findAmountInString(line.text) {
-                    candidates.append(amount)
-                } else {
-                    // Satırda yoksa, bu satırın hemen altındaki veya sağındaki bloklara bakmak gerekir
-                    // SpatialEngine'de bu logic olmadığı için şimdilik satır bazlı devam ediyoruz
-                    // İleride SpatialEngine.findBlockToRight(of: line) eklenebilir.
-                }
-            }
-            
-            // 2. Genel Arama (Eski Yöntem)
+            // Kara liste kontrolü (KDV hariç, vb.)
             if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
-            // Sadece "TOPLAM" kelimesine güvenme, "ARA TOPLAM" da olabilir
-            if upper.contains("TOPLAM") && !upper.contains("ARA") && !upper.contains("KDV") {
-                if let amount = InvoiceParserHelper.findAmountInString(line.text) {
-                    candidates.append(amount)
+            
+            // 1. Strict Anchor Kontrolü
+            if strictAnchors.contains(where: { upper.contains($0) }) {
+                // Çapa bulundu! Hemen sayıları çek.
+                let amounts = InvoiceParserHelper.extractAllAmounts(from: line.text)
+                if let rightMost = amounts.last, rightMost > 0 {
+                    return rightMost // BULDUK VE DURDUK
                 }
             }
             
-            // 3. Çıplak Sayılar
-            if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
-                if let amount = InvoiceParserHelper.findAmountInString(line.text) {
-                    candidates.append(amount)
+            // 2. Yedek "TOPLAM" Kontrolü
+            // "TOPLAM KDV" veya "ARA TOPLAM" değilse ve içinde "TOPLAM" geçiyorsa
+            if upper.contains("TOPLAM") && !upper.contains("KDV") && !upper.contains("ARA") {
+                let amounts = InvoiceParserHelper.extractAllAmounts(from: line.text)
+                if let rightMost = amounts.last, rightMost > 0 {
+                     return rightMost // Alttan başladığımız için ilk bulduğumuz "TOPLAM" en alttakidir.
                 }
             }
         }
         
-        // Doğrulama (Heuristic): En büyük değer mi?
-        let maxCandidate = candidates.max() ?? 0.0
-        
-        // Eğer aday 0 ise, tüm sayıları topla ve en büyüğü al (Son çare)
-        if maxCandidate == 0.0 {
-            let allText = lines.map { $0.text }.joined(separator: "\n")
-            let allAmounts = InvoiceParserHelper.findAllAmountsInString(allText)
-            return allAmounts.max() ?? 0.0
+        // 3. Fallback: Çıplak Sayılar (Hala bulunamadıysa)
+        for line in lines.reversed() {
+            if line.text.uppercased().contains("ÖDENECEK") {
+                let amounts = InvoiceParserHelper.extractAllAmounts(from: line.text)
+                if let rightMost = amounts.last, rightMost > 0 { return rightMost }
+            }
         }
         
-        return maxCandidate
+        var allCandidates: [Double] = []
+        for line in lines.reversed() {
+             let amounts = InvoiceParserHelper.extractAllAmounts(from: line.text)
+             allCandidates.append(contentsOf: amounts)
+        }
+        return allCandidates.max() ?? 0.0
     }
     
     private func extractSubTotalFromZone(lines: [TextLine], totalAmount: Double, taxRate: Double) -> Double {
@@ -176,7 +198,7 @@ class FinancialStrategy: InvoiceExtractionStrategy {
         for line in lines.reversed() {
              let upper = line.text.uppercased()
              if RegexPatterns.Keywords.subTotalAmounts.contains(where: { upper.contains($0) }) {
-                 if let amount = InvoiceParserHelper.findAmountInString(line.text) {
+                 if let amount = InvoiceParserHelper.extractAmount(from: line.text) {
                      // Matrah, toplamdan küçük olmalı
                      if totalAmount > 0 && amount < totalAmount {
                          return amount
@@ -199,7 +221,7 @@ class FinancialStrategy: InvoiceExtractionStrategy {
              let upper = line.text.uppercased()
              // "TOPLAM KDV" veya sadece "KDV" ama "KDV HARİÇ" değil
              if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) {
-                 if let amount = InvoiceParserHelper.findAmountInString(line.text) {
+                 if let amount = InvoiceParserHelper.extractAmount(from: line.text) {
                      // KDV validasyonu
                      if subTotal > 0 {
                          let expected = subTotal * taxRate
@@ -225,14 +247,38 @@ class FinancialStrategy: InvoiceExtractionStrategy {
     
     private func extractTotalAmountFallback(from text: String) -> Double {
         let lines = text.components(separatedBy: .newlines)
-        var candidates: [Double] = []
+        
+        // İstenen Mantık: Bottom-Up + Stop Immediately (Fallback için de geçerli)
+        let strictAnchors = ["ÖDENECEK TUTAR", "VERGİLER DAHİL TOPLAM", "GENEL TOPLAM", "TOPLAM TUTAR"]
         
         for line in lines.reversed() {
             let upper = line.uppercased()
+            
+            // Kara liste (KDV Hariç vb.)
             if RegexPatterns.Keywords.amountBlacklist.contains(where: { upper.contains($0) }) { continue }
-            if RegexPatterns.Keywords.payableAmounts.contains(where: { upper.contains($0) }) {
-                if let amount = InvoiceParserHelper.findAmountInString(line) { candidates.append(amount) }
+            
+            // 1. Strict Anchor
+            if strictAnchors.contains(where: { upper.contains($0) }) {
+                 let amounts = InvoiceParserHelper.extractAllAmounts(from: line)
+                 if let rightMost = amounts.last, rightMost > 0 {
+                     return rightMost
+                 }
             }
+            
+            // 2. Yedek "TOPLAM"
+            if upper.contains("TOPLAM") && !upper.contains("KDV") && !upper.contains("ARA") {
+                let amounts = InvoiceParserHelper.extractAllAmounts(from: line)
+                if let rightMost = amounts.last, rightMost > 0 {
+                    return rightMost
+                }
+            }
+        }
+        
+        // 3. Hiçbiri yoksa -> Max Value (Son Çare)
+        var candidates: [Double] = []
+        for line in lines {
+             let amounts = InvoiceParserHelper.extractAllAmounts(from: line)
+             candidates.append(contentsOf: amounts)
         }
         return candidates.max() ?? 0.0
     }
@@ -244,7 +290,7 @@ class FinancialStrategy: InvoiceExtractionStrategy {
         for line in lines.reversed() {
             let upper = line.uppercased()
             if RegexPatterns.Keywords.subTotalAmounts.contains(where: { upper.contains($0) }) {
-                if let amount = InvoiceParserHelper.findAmountInString(line) { candidates.append(amount) }
+                if let amount = InvoiceParserHelper.extractAmount(from: line) { candidates.append(amount) }
             }
         }
         
@@ -262,7 +308,7 @@ class FinancialStrategy: InvoiceExtractionStrategy {
         for line in lines.reversed() {
              let upper = line.uppercased()
              if RegexPatterns.Keywords.taxAmounts.contains(where: { upper.contains($0) }) {
-                 if let amount = InvoiceParserHelper.findAmountInString(line) { candidates.append(amount) }
+                 if let amount = InvoiceParserHelper.extractAmount(from: line) { candidates.append(amount) }
              }
         }
         

@@ -19,12 +19,12 @@ struct A101Profile: VendorProfile {
                textLowercased.contains("a101.com.tr")
     }
     
-    func applyRules(to invoice: inout Invoice, rawText: String) {
+    func applyRules(to invoice: inout Invoice, rawText: String, blocks: [TextBlock]) {
         // Kural 1: Fatura No Fallback
         // A101 faturaları bazen standart dışı olup 'A' ile başlayıp 15 hane sürebiliyor.
         // Python Regex: \bA\d{15}\b
         if invoice.invoiceNo.isEmpty {
-            if let customInvoiceNo = InvoiceParserHelper.extractString(from: rawText, pattern: "\\bA\\d{15}\\b") {
+            if let customInvoiceNo = InvoiceParserHelper.extractInvoiceNo(from: rawText) {
                 invoice.invoiceNo = customInvoiceNo
             }
         }
@@ -33,9 +33,8 @@ struct A101Profile: VendorProfile {
         // "Ödenecek Tutar" bazen okunamazsa alternatif kelimelere bak.
         // Python Regex: (?:Ödenecek\s*Tutar|Genel\s*Toplam|Vergiler\s*Dahil\s*Toplam)...
         if invoice.totalAmount == 0.0 {
-            let pattern = "(?:Ödenecek\\s*Tutar|Genel\\s*Toplam|Vergiler\\s*Dahil\\s*Toplam)\\s*[:\\-]?\\s*(\\d{1,3}(?:\\.\\d{3})*,\\d{2})"
-            if let amountStr = InvoiceParserHelper.extractString(from: rawText, pattern: pattern) {
-                invoice.totalAmount = InvoiceParserHelper.normalizeAmount(amountStr)
+            if let amount = InvoiceParserHelper.extractAmount(from: rawText) {
+                invoice.totalAmount = amount
             }
         }
         

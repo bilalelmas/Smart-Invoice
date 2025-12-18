@@ -16,7 +16,8 @@ protocol VendorProfile {
     /// - Parameters:
     ///   - invoice: Düzenlenecek fatura objesi (inout ile referans olarak gelir)
     ///   - rawText: Orijinal ham metin
-    func applyRules(to invoice: inout Invoice, rawText: String)
+    ///   - blocks: Apple Vision'dan gelen metin blokları (Konumsal analiz için)
+    func applyRules(to invoice: inout Invoice, rawText: String, blocks: [TextBlock])
     
     /// Satıcıya özgü anahtar kelimeler (Confidence artırmak için)
     /// Örn: ["A101", "Yeni Mağazacılık"]
