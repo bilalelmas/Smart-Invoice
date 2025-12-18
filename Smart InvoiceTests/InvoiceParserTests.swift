@@ -152,6 +152,87 @@ final class InvoiceParserTests: XCTestCase {
         XCTAssertLessThanOrEqual(invoice.confidenceScore, 1.0)
     }
     
+    // MARK: - Pipeline Integration Tests
+    
+    func testPipeline_TrendyolProfileWithBlocks() async throws {
+        // Trendyol anahtar kelimeleri + basit footer
+        let blocks: [TextBlock] = [
+            TextBlock(text: "DSM GRUP DANISMANLIK", frame: CGRect(x: 0.1, y: 0.1, width: 0.4, height: 0.02), confidence: 0.9),
+            TextBlock(text: "TRENDYOL", frame: CGRect(x: 0.1, y: 0.12, width: 0.3, height: 0.02), confidence: 0.9),
+            TextBlock(text: "FATURA NO ABC2023123456789", frame: CGRect(x: 0.6, y: 0.1, width: 0.3, height: 0.02), confidence: 0.9),
+            TextBlock(text: "FATURA TARİHİ 15.03.2024", frame: CGRect(x: 0.6, y: 0.12, width: 0.3, height: 0.02), confidence: 0.9),
+            TextBlock(text: "ETTN 12345678-1234-1234-1234-123456789012", frame: CGRect(x: 0.6, y: 0.14, width: 0.35, height: 0.02), confidence: 0.9),
+            TextBlock(text: "MAL HİZMET", frame: CGRect(x: 0.1, y: 0.3, width: 0.2, height: 0.02), confidence: 0.9),
+            TextBlock(text: "ÜRÜN ADI", frame: CGRect(x: 0.3, y: 0.3, width: 0.2, height: 0.02), confidence: 0.9),
+            TextBlock(text: "TOPLAM", frame: CGRect(x: 0.7, y: 0.3, width: 0.2, height: 0.02), confidence: 0.9),
+            TextBlock(text: "Ürün X 100,00 TL", frame: CGRect(x: 0.1, y: 0.35, width: 0.8, height: 0.02), confidence: 0.9),
+            TextBlock(text: "GENEL TOPLAM 100,00 TL", frame: CGRect(x: 0.6, y: 0.8, width: 0.3, height: 0.02), confidence: 0.9)
+        ]
+        
+        let rawText = blocks.map { $0.text }.joined(separator: "\n")
+        let invoice = try await parser.parse(blocks: blocks, rawText: rawText)
+        
+        XCTAssertTrue(invoice.merchantName.contains("DSM") || invoice.merchantName.contains("TRENDYOL"))
+        XCTAssertFalse(invoice.invoiceNo.isEmpty)
+        XCTAssertFalse(invoice.ettn.isEmpty)
+        XCTAssertGreaterThan(invoice.totalAmount, 0.0)
+        XCTAssertGreaterThan(invoice.confidenceScore, 0.0)
+    }
+    
+    func testPipeline_A101ProfileWithRawText() async throws {
+        let text = """
+        A101 Yeni Mağazacılık A.Ş.
+        Fatura No: A123456789012345
+        Tarih: 01.02.2024
+        Ödenecek Tutar: 250,00 TL
+        """
+        
+        let invoice = try await parser.parse(blocks: [], rawText: text)
+        
+        XCTAssertEqual(invoice.merchantName, "A101 Yeni Mağazacılık A.Ş.")
+        XCTAssertEqual(invoice.invoiceNo, "A123456789012345")
+        XCTAssertGreaterThan(invoice.totalAmount, 0.0)
+        XCTAssertGreaterThan(invoice.confidenceScore, 0.0)
+    }
+    
+    func testPipeline_GenericProfileFallback() async throws {
+        let text = """
+        XYZ Teknoloji Ltd. Şti.
+        Adres: İstanbul
+        Fatura No: INV20240001
+        Tarih: 05.04.2024
+        Toplam: 150,00 TL
+        """
+        
+        let invoice = try await parser.parse(blocks: [], rawText: text)
+        
+        // Hiçbir vendor profilinin apply'ine girmese bile temel alanlar dolu olmalı
+        XCTAssertTrue(invoice.merchantName.contains("XYZ"))
+        XCTAssertFalse(invoice.invoiceNo.isEmpty)
+        XCTAssertGreaterThan(invoice.totalAmount, 0.0)
+        XCTAssertGreaterThan(invoice.confidenceScore, 0.0)
+    }
+    
+    // MARK: - Debug & Confidence Smoke Test
+    
+    func testDebugRegionsAndConfidence_WithBlocks() async throws {
+        let blocks: [TextBlock] = [
+            TextBlock(text: "ABC Şirketi A.Ş.", frame: CGRect(x: 0.1, y: 0.1, width: 0.4, height: 0.02), confidence: 0.9),
+            TextBlock(text: "SAYIN MÜŞTERİ", frame: CGRect(x: 0.1, y: 0.18, width: 0.4, height: 0.02), confidence: 0.9),
+            TextBlock(text: "MAL HİZMET", frame: CGRect(x: 0.1, y: 0.3, width: 0.2, height: 0.02), confidence: 0.9),
+            TextBlock(text: "TOPLAM", frame: CGRect(x: 0.7, y: 0.3, width: 0.2, height: 0.02), confidence: 0.9),
+            TextBlock(text: "Ürün Y 80,00 TL", frame: CGRect(x: 0.1, y: 0.35, width: 0.8, height: 0.02), confidence: 0.9),
+            TextBlock(text: "GENEL TOPLAM 80,00 TL", frame: CGRect(x: 0.6, y: 0.8, width: 0.3, height: 0.02), confidence: 0.9),
+            TextBlock(text: "Tarih: 10.03.2024", frame: CGRect(x: 0.6, y: 0.15, width: 0.3, height: 0.02), confidence: 0.9)
+        ]
+        
+        let rawText = blocks.map { $0.text }.joined(separator: "\n")
+        let invoice = try await parser.parse(blocks: blocks, rawText: rawText)
+        
+        XCTAssertFalse(invoice.debugRegions.isEmpty)
+        XCTAssertGreaterThan(invoice.confidenceScore, 0.0)
+    }
+    
     // MARK: - Error Handling Tests
     
     func testEmptyInput() async {

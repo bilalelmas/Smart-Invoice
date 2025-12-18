@@ -325,4 +325,84 @@ let prediction = try model.prediction(input: textFeatures)
 **Son Güncelleme:** 2025-01-27  
 **Versiyon:** 1.1
 
+---
 
+## 🧠 Fatura Ayrıştırma Pipeline’ı (InvoiceParser)
+
+Bu bölüm, tezde “Sistem Tasarımı – Fatura Ayrıştırma Modülü” altında doğrudan kullanılabilecek şekilde tasarlanmıştır.
+
+### 1. Adım Listesi
+
+1. **Input Doğrulama (`validateInput`)**  
+   - Hem `blocks` hem de `rawText` boşsa `InvoiceParserError.emptyInput` fırlatılır.
+
+2. **Girdi Hazırlama (`prepareInput`)**  
+   - `SpatialEngine.clusterRows` ile bloklar satırlara (`[TextLine]`) kümelenir.  
+   - Eğer `rawText` verilmemişse, satırların `text` alanları birleştirilerek `fullText` üretilir.
+
+3. **Profil Tespiti (`detectProfile`)**  
+   - Tüm `VendorProfile` implementasyonları üzerinde `applies(to:)` çağrılır.  
+   - `true` dönen **ilk** profil seçilir ve sadece bu profilin `applyRules` metodu çağrılır.  
+   - Hiç profil bulunamazsa, pipeline “generic” modda devam eder.
+
+4. **Stratejilerin Çalışması (`runStrategies`)**  
+   - `ExtractionContext(blocks:lines:rawText:profile:)` oluşturulur.  
+   - Sırayla `VendorStrategy`, `InvoiceDetailsStrategy`, `ItemsStrategy`, `FinancialStrategy` çalıştırılır.  
+   - Bu katman sadece **“hangi alanların”** çıkarılacağını tanımlar; regex ve parsing detayları helper katmanındadır.
+
+5. **Vendor Post-Processing (`applyVendorRules`)**  
+   - Eğer bir `VendorProfile` tespit edildiyse, ilgili profilin `applyRules(to:rawText:blocks:)` metodu çağrılır.  
+   - Profil-spesifik invoice no / toplam / metadata düzeltmeleri burada yapılır.
+
+6. **Debug Region Üretimi (`buildDebugRegions`)**  
+   - Sadece blok tabanlı parse’larda çalışır (`blocks` boş değilse).  
+   - Aşağıdaki yardımcı fonksiyonlar üzerinden `invoice.debugRegions` doldurulur:
+     - `addSellerRegion`: splitter keyword’ünden (“SAYIN”, “ALICI” vb.) önceki satırların birleşimi; splitter yoksa ilk %20’lik kısım.  
+     - `addTableRegion`: ilk tablo başlığından (`tableHeaders`) ilk tablo sonuna (`tableFooters`) kadar olan satırlar.  
+     - `addTotalRegion`: `invoice.totalAmount` ile tutarı eşleşen ilk blok.  
+     - `addDateRegion`: tarih içeren (`containsDate`) ilk blok.  
+     - `addTaxRegion`: `invoice.taxAmount` ile tutarı eşleşen ilk blok.  
+     - `addSubTotalRegion`: `invoice.subTotal` ile tutarı eşleşen ilk blok.
+
+7. **Confidence Hesabı (`computeConfidence`)**  
+   - Alan bazlı alt skorlar hesaplanır ve ağırlıklı ortalamaları alınır:
+
+   \[
+     \text{score} = s_\text{basic} \cdot w_b +
+                    s_\text{financial} \cdot w_f +
+                    s_\text{quality} \cdot w_q +
+                    s_\text{items} \cdot w_i
+   \]
+
+   - Ağırlıklar:
+     - Temel Alanlar: \(w_b = 0.4\)  
+     - Finansal Tutarlılık: \(w_f = 0.3\)  
+     - Kalite (invoice no formatı, tarih): \(w_q = 0.2\)  
+     - Ürün Kalemleri: \(w_i = 0.1\)
+
+   - Alt skorlar:
+     - \(s_\text{basic}\): `merchantName`, `merchantTaxID`, `totalAmount`, `ettn` uzunluğu üzerinden normalize puan.  
+     - \(s_\text{financial}\): `totalAmount`, `subTotal`, `taxAmount` üçlüsünün matematiksel tutarlılığı (±%1 tolerans).  
+     - \(s_\text{quality}\): fatura numarası uzunluğu / formatı + tarih geçerliliği.  
+     - \(s_\text{items}\): en az bir `InvoiceItem` varsa 1, yoksa 0.
+
+   - Ek kural:
+     - Eğer `totalAmount == 0` ise, skor \(0.5\) ile çarpılarak yarıya indirilir (kritik alan eksikliği cezası).
+
+### 2. Mermaid Diyagram Taslağı
+
+```mermaid
+flowchart TD
+    A[OCR TextBlocks + rawText] --> B[validateInput]
+    B --> C[prepareInput\nclusterRows + fullText]
+    C --> D[detectProfile\nVendorProfile.applies]
+    C --> E[ExtractionContext]
+    D --> E
+    E --> F[runStrategies\nVendor/Details/Items/Financial]
+    F --> G[applyVendorRules\nVendorProfile.applyRules]
+    F --> H[buildDebugRegions\nseller/table/total/date/tax/subTotal]
+    F --> I[computeConfidence\nweighted scores]
+    G --> I
+    H --> I
+    I --> J[Invoice\n+ debugRegions + confidenceScore]
+```
