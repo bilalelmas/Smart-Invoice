@@ -18,118 +18,69 @@ struct DashboardView: View {
     
     // UI Durumları
     var body: some View {
-        ZStack {
-            NavigationStack {
-                VStack(spacing: 0) {
-                    // 1. Analiz Başlığı (Sabit)
-                    analysisHeader
-                        .padding(.horizontal)
-                        .padding(.top, 10)
-                        .padding(.bottom, 20)
-                    
-                    // 1.5 Arama ve Filtreleme
-                    searchAndFilterBar
-                        .padding(.horizontal)
-                        .padding(.bottom, 10)
-                    
-                    // 2. Fatura Listesi
-                    if viewModel.filteredInvoices.isEmpty {
-                        Spacer()
-                        emptyStateView
-                        Spacer()
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                // Tarihe göre grupla (filtrelenmiş listeyi kullan)
-                                let grouped = Dictionary(grouping: viewModel.filteredInvoices) { (invoice) -> String in
-                                    let formatter = DateFormatter()
-                                    formatter.dateStyle = .medium
-                                    formatter.timeStyle = .none
-                                    formatter.locale = Locale(identifier: "tr_TR")
-                                    
-                                    if Calendar.current.isDateInToday(invoice.invoiceDate) {
-                                        return "Bugün"
-                                    } else if Calendar.current.isDateInYesterday(invoice.invoiceDate) {
-                                        return "Dün"
-                                    }
-                                    return formatter.string(from: invoice.invoiceDate)
-                                }
-                                
-                                // Grupları sırala (Yeniden eskiye)
-                                let sortedKeys = grouped.keys.sorted { dateStr1, dateStr2 in
-                                    // Basit string sıralaması yerine gerçek tarih karşılaştırması daha iyi olurdu ama
-                                    // şimdilik listeyi zaten viewModel'de sıralı tutuyoruz.
-                                    // Pratik çözüm: ViewModel'deki sıraya güvenmek.
-                                    return true 
-                                }
-                                
-                                ForEach(sortedKeys.prefix(displayedCount / pageSize + 1), id: \.self) { key in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        // Section Header
-                                        HStack {
-                                            Text(key)
-                                                .font(.system(size: 14, weight: .bold))
-                                                .foregroundColor(.secondary)
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 8)
-                                        
-                                        // Invoice Cards
-                                        ForEach(Array((grouped[key] ?? []).prefix(displayedCount)), id: \.id) { invoice in
-                                            InvoiceRowView(invoice: invoice) {
-                                                viewModel.editInvoice(invoice)
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .transition(.asymmetric(
-                                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                                removal: .move(edge: .leading).combined(with: .opacity)
-                                            ))
-                                            .onAppear {
-                                                // Son öğeye yaklaşıldığında daha fazla yükle
-                                                if let index = viewModel.filteredInvoices.firstIndex(where: { $0.id == invoice.id }),
-                                                   index >= displayedCount - 5 {
-                                                    loadMore()
-                                                }
-                                            }
-                                        }
-                                    }
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Üst: basit özet
+                simpleSummaryHeader
+                    .padding()
+                
+                // Arama ve filtre
+                searchAndFilterBar
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                
+                // Fatura listesi
+                if viewModel.filteredInvoices.isEmpty {
+                    Spacer()
+                    emptyStateView
+                    Spacer()
+                } else {
+                    List {
+                        ForEach(viewModel.filteredInvoices, id: \.id) { invoice in
+                            NavigationLink {
+                                // Detay: şimdilik düzenleme ekranını açıyoruz
+                                InvoiceEditView(
+                                    invoice: .constant(invoice),
+                                    onSave: { },
+                                    onCancel: { },
+                                    image: nil
+                                )
+                            } label: {
+                                InvoiceRowView(invoice: invoice) {
+                                    viewModel.editInvoice(invoice)
                                 }
                             }
-                            .padding(.vertical, 8)
                         }
-                        .refreshable {
-                            await refreshInvoices()
-                        }
-                    }
-                }
-                .navigationTitle("Faturalarım")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        if viewModel.hasActiveFilters {
-                            Button(action: {
-                                viewModel.clearFilters()
-                            }) {
-                                Label("Filtreleri Temizle", systemImage: "xmark.circle.fill")
-                                    .foregroundColor(.red)
+                        .onDelete { indices in
+                            let invoicesToDelete = indices.map { viewModel.filteredInvoices[$0] }
+                            Task { @MainActor in
+                                for invoice in invoicesToDelete {
+                                    await viewModel.deleteInvoice(invoice)
+                                }
                             }
                         }
                     }
-                }
-                .onAppear {
-                    // Uygulama açıldığında veya bu view göründüğünde faturaları yükle
-                    if viewModel.invoices.isEmpty {
-                        Task {
-                            await viewModel.loadInvoices()
-                        }
+                    .listStyle(.plain)
+                    .refreshable {
+                        await refreshInvoices()
                     }
                 }
             }
-            
-            // YÜKLENİYOR
-            if viewModel.isProcessing {
-                loadingOverlay
+            .navigationTitle("Faturalar")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        // Ana tab’daki action sheet’i tetiklemek için NotificationCenter vb. ile bir sinyal gönderebiliriz (gelecek adım),
+                        // şimdilik filtre temizleme burada kalıyor.
+                        if viewModel.hasActiveFilters {
+                            viewModel.clearFilters()
+                        }
+                    } label: {
+                        if viewModel.hasActiveFilters {
+                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                        }
+                    }
+                }
             }
         }
         // 3. Analiz Bitince Düzenleme Ekranı (EditView)
@@ -180,94 +131,30 @@ struct DashboardView: View {
         return formatter
     }
     
-    // MARK: - Analysis Header
-    var analysisHeader: some View {
-        VStack(spacing: 16) {
-            // Üst Başlık ve Tarih
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Finansal Özet")
-                        .font(.headline)
-                        .foregroundColor(.white.opacity(0.8))
-                    Text("Bu Ay")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                }
-                Spacer()
-                // Belge Sayısı Rozeti
-                HStack(spacing: 4) {
-                    Image(systemName: "doc.text.fill")
-                    Text("\(viewModel.filteredInvoices.count) Belge")
-                }
-                .font(.caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(0.2))
-                .cornerRadius(20)
-                .foregroundColor(.white)
+    // MARK: - Basit Özet Header
+    var simpleSummaryHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Toplam Fatura")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("\(viewModel.filteredInvoices.count)")
+                    .font(.title2.bold())
             }
-            
-            // Finansal Detaylar (Grid Yapısı)
-            HStack(spacing: 0) {
-                // 1. Matrah (Vergisiz)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Matrah")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(formatCurrency(calculateTotalBaseAmount()))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .contentTransition(.numericText())
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-                // Ayraç
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: 1, height: 30)
-                
-                // 2. KDV
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Top. KDV")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(formatCurrency(calculateTotalTax()))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.orange) // KDV dikkat çeksin
-                        .contentTransition(.numericText())
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 12)
-            }
-            
-            Divider().background(Color.white.opacity(0.3))
-            
-            // 3. Genel Toplam (En Altta Büyük)
-            HStack {
-                Text("Genel Toplam")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.9))
-                Spacer()
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("Toplam Tutar")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 Text(formatCurrency(calculateTotalAmount()))
-                    .font(.system(size: 28, weight: .bold)) // Daha büyük
-                    .foregroundColor(.white)
-                    .contentTransition(.numericText())
+                    .font(.headline)
             }
         }
-        .padding(20)
+        .padding()
         .background(
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.1, green: 0.16, blue: 0.42), // #1a2a6c
-                    Color(red: 0.70, green: 0.12, blue: 0.12)  // #b21f1f
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(UIColor.secondarySystemBackground))
         )
-        .cornerRadius(24)
-        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
     }
     
     // MARK: - Arama ve Filtreleme UI

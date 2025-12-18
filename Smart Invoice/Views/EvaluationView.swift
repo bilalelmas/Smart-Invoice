@@ -46,13 +46,8 @@ struct EvaluationView: View {
                         }
                     }) {
                         Text("Testi Başlat")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(12)
                     }
+                    .buttonStyle(PrimaryButtonStyle())
                     .padding()
                 }
             }

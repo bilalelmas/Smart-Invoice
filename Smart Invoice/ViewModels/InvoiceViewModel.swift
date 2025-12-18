@@ -191,6 +191,19 @@ class InvoiceViewModel: ObservableObject {
         self.currentImage = nil // Kaydedilmiş faturalarda görsel yok
     }
     
+    /// Bir faturayı Firebase'den ve yerel listeden siler.
+    @MainActor
+    func deleteInvoice(_ invoice: Invoice) async {
+        guard let invoiceId = invoice.id else { return }
+        do {
+            try await repository.deleteInvoice(invoiceId)
+            self.invoices.removeAll { $0.id == invoiceId }
+        } catch {
+            self.errorMessage = "Silme hatası: \(error.localizedDescription)"
+            print("❌ Silme hatası: \(error.localizedDescription)")
+        }
+    }
+    
     // MARK: - Raporlama
     
     /// Faturalar için PDF ve CSV raporlarını oluşturur.

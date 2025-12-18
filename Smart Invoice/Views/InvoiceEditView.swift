@@ -26,6 +26,8 @@ struct InvoiceEditView: View {
     @State private var showSuccessMessage = false
     @State private var autoSaveTask: Task<Void, Never>?
     @State private var hasUnsavedChanges = false
+    // Debug overlay görünürlüğü
+    @State private var showDebugOverlay: Bool = false
     
     // View yüklendiğinde değerleri String'e çevir (sadece ilk yüklemede)
     private func initializeAmountTexts() {
@@ -126,8 +128,8 @@ struct InvoiceEditView: View {
                 
                 ScrollView {
                     VStack(spacing: 24) {
-                        // 0. Görsel Hata Ayıklayıcı (Visual Debugger)
-                        if let image = image, !invoice.debugRegions.isEmpty {
+                        // 0. Görsel Hata Ayıklayıcı (Visual Debugger) – isteğe bağlı toggle
+                        if let image = image, !invoice.debugRegions.isEmpty, showDebugOverlay {
                             VStack(alignment: .leading) {
                                 Text("Görsel Analiz")
                                     .font(.caption)
@@ -142,9 +144,6 @@ struct InvoiceEditView: View {
                                         .overlay(
                                             GeometryReader { geometry in
                                                 ForEach(invoice.debugRegions) { region in
-                                                    // Artık koordinatlar UIKit sisteminde (sol üst köşe)
-                                                    // SwiftUI da sol üst köşe kullanır, direkt kullanabiliriz
-                                                    
                                                     let w = region.rect.width * geometry.size.width
                                                     let h = region.rect.height * geometry.size.height
                                                     let x = region.rect.origin.x * geometry.size.width
@@ -325,14 +324,8 @@ struct InvoiceEditView: View {
                                 }
                                 Text(validationErrors.isEmpty ? "Değişiklikleri Onayla ve Kaydet" : "Lütfen Hataları Düzeltin")
                             }
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(validationErrors.isEmpty ? Color.blue : Color.orange)
-                            .cornerRadius(16)
-                            .shadow(radius: 5)
                         }
+                        .buttonStyle(PrimaryButtonStyle())
                         .padding(.top, 10)
                         .disabled(!validationErrors.isEmpty)
                         
@@ -347,6 +340,18 @@ struct InvoiceEditView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("İptal") { onCancel() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    if image != nil && !invoice.debugRegions.isEmpty {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showDebugOverlay.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showDebugOverlay ? "eye.slash" : "eye")
+                        }
+                        .accessibilityLabel("Debug overlay")
+                    }
+                }
             }
             .overlay(alignment: .top) {
                 // Auto-save başarı mesajı
@@ -360,7 +365,7 @@ struct InvoiceEditView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(Color.green)
+                    .background(Color.success)
                     .cornerRadius(12)
                     .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
                     .padding(.top, 60)

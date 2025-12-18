@@ -25,4 +25,18 @@ extension Color {
             opacity: Double(a) / 255
         )
     }
+    
+    // MARK: - Tez-Core Tasarım Paleti
+    
+    /// Uygulamanın ana vurgu rengi (butonlar, başlık şeritleri vb.)
+    static let primaryAccent = Color(hex: "4E54C8") // Mor/lacivert ton
+    
+    /// Başarılı işlemler ve yüksek confidence göstergeleri için.
+    static let success = Color(hex: "2ECC71") // Yeşil
+    
+    /// Hata ve uyarılar için.
+    static let error = Color(hex: "E74C3C") // Kırmızı
+    
+    /// Nötr arka planlar (kart arkası, listeler).
+    static let neutralBackground = Color(UIColor.systemGroupedBackground)
 }
